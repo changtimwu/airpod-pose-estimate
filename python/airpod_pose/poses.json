@@ -12,46 +12,78 @@
     "between demo runs without restarting the server."
   ],
   "version": 1,
-  "sequence": ["mountain", "warrior_ii", "upward_salute", "triangle", "side_angle"],
+  "sequence": [
+    "triangle"
+  ],
   "poses": {
     "mountain": {
       "label_en": "Mountain",
       "label_sa": "Tadasana",
       "hold_ms": 3000,
-      "pitch": [-90, -72],
-      "roll": [-180, 180],
+      "pitch": [
+        -90,
+        -72
+      ],
+      "roll": [
+        -180,
+        180
+      ],
       "exit_margin_deg": 8
     },
     "warrior_ii": {
       "label_en": "Warrior II",
       "label_sa": "Virabhadrasana II",
       "hold_ms": 8000,
-      "pitch": [-12, 12],
-      "roll": [-30, 30],
+      "pitch": [
+        -12,
+        12
+      ],
+      "roll": [
+        -30,
+        30
+      ],
       "exit_margin_deg": 8
     },
     "upward_salute": {
       "label_en": "Upward Salute",
       "label_sa": "Urdhva Hastasana",
       "hold_ms": 5000,
-      "pitch": [72, 90],
-      "roll": [-45, 45],
+      "pitch": [
+        72,
+        90
+      ],
+      "roll": [
+        -45,
+        45
+      ],
       "exit_margin_deg": 8
     },
     "triangle": {
       "label_en": "Triangle",
       "label_sa": "Trikonasana",
       "hold_ms": 6000,
-      "pitch": [58, 88],
-      "roll": [45, 135],
+      "pitch": [
+        58,
+        88
+      ],
+      "roll": [
+        45,
+        135
+      ],
       "exit_margin_deg": 8
     },
     "side_angle": {
       "label_en": "Extended Side Angle",
       "label_sa": "Utthita Parsvakonasana",
       "hold_ms": 6000,
-      "pitch": [28, 56],
-      "roll": [-45, 45],
+      "pitch": [
+        28,
+        56
+      ],
+      "roll": [
+        -45,
+        45
+      ],
       "exit_margin_deg": 8
     }
   }

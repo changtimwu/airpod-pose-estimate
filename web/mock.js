@@ -16,13 +16,15 @@
 
   var HZ = 25;
 
-  var LABELS = { tree: { en: 'Tree', sa: 'Vrksasana' } };
+  var LABELS = { triangle: { en: 'Triangle', sa: 'Trikonasana' } };
 
   /* Hypothesis only — Signal replaces these with measured values in
      poses.yaml. Arms overhead, palms together: the forearm is furthest
      from the calibration zero, which makes it the most separable pose
      on the arm we have. */
-  var BAND = { pitch: [62, 90], roll: [-45, 45], exit: 8 };
+  // Mirrors python/airpod_pose/poses.json "triangle" -- keep them in step, or
+  // the rehearsal path and the live path disagree about what counts as held.
+  var BAND = { pitch: [58, 88], roll: [45, 135], exit: 8 };
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
@@ -68,7 +70,7 @@
     if (cmd === 'calibrate') { this.status = 'calibrating'; this.calibT = 0; }
     else if (cmd === 'start' && (this.status === 'ready' || this.status === 'complete')) {
       this.status = 'active'; this.holdMs = 0; this.elapsed = 0; this.started = this.t;
-      this.emit({ event: 'pose_entered', pose: 'tree' });
+      this.emit({ event: 'pose_entered', pose: 'triangle' });
     }
     else if (cmd === 'skip') { this.status = 'ready'; this.holdMs = 0; }
     else if (cmd === 'reset') { this.status = 'ready'; this.holdMs = 0; this.elapsed = 0; this.score = 0; }
@@ -107,8 +109,8 @@
                  this.roll >= BAND.roll[0] - m && this.roll <= BAND.roll[1] + m;
 
     if (this.status === 'active') {
-      if (inBand && !this.matched) this.emit({ event: 'pose_entered', pose: 'tree' });
-      if (!inBand && this.matched) this.emit({ event: 'pose_lost', pose: 'tree', hold_ms: Math.round(this.holdMs) });
+      if (inBand && !this.matched) this.emit({ event: 'pose_entered', pose: 'triangle' });
+      if (!inBand && this.matched) this.emit({ event: 'pose_lost', pose: 'triangle', hold_ms: Math.round(this.holdMs) });
       this.matched = inBand;
       this.holdMs = inBand ? this.holdMs + dt * 1000 : 0;
       this.elapsed += dt * 1000;
@@ -139,8 +141,8 @@
         quality: 'good'
       },
       pose: {
-        target: 'tree',
-        detected: inBand ? 'tree' : null,
+        target: 'triangle',
+        detected: inBand ? 'triangle' : null,
         match: inBand,
         confidence: +clamp(1 - err / 40, 0, 1).toFixed(3),
         error_deg: +err.toFixed(2),
@@ -149,7 +151,7 @@
         band: BAND.pitch
       },
       session: {
-        index: 0, total: 1, sequence: ['tree'],
+        index: 0, total: 1, sequence: ['triangle'],
         labels: LABELS,
         score: +this.score.toFixed(3),
         elapsed_ms: Math.round(this.elapsed)

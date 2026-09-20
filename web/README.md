@@ -1,6 +1,6 @@
 # web/ — the interface
 
-Owners 03 (INTERFACE) and 04 (EXPERIENCE). One pose, **Tree**, and the longer
+Owners 03 (INTERFACE) and 04 (EXPERIENCE). One pose, **Triangle**, and the longer
 you hold it the bigger the voxel tree gets.
 
 Transport is SSE, matching Bridge's scaffold: frames on `GET /stream`, commands
@@ -43,27 +43,32 @@ skip · <kbd>R</kbd> reset.
 
 ---
 
-## What SIGNAL needs to add
+## What SIGNAL has
 
-The server currently streams the five-pose sequence. This screen wants one pose.
-`poses.yaml`:
+Done: `python/airpod_pose/poses.json` now streams a single pose, Triangle
+(Trikonasana), per issue #3. The tree is not a pose — it is how long you held
+one, so the screen and the sequence agree on exactly one thing to hold.
 
-```yaml
-sequence: [tree]
-
-poses:
-  tree:
-    label_en: "Tree"
-    label_sa: "Vrksasana"
-    hold_ms: 10000
-    pitch: [62, 90]          # MEASURE THIS. Arms overhead, palms together.
-    roll:  [-45, 45]
-    exit_margin_deg: 8
+```json
+"sequence": ["triangle"],
+"triangle": {
+  "label_en": "Triangle", "label_sa": "Trikonasana",
+  "hold_ms": 6000,
+  "pitch": [58, 88],          // MEASURE THIS. Still a guess.
+  "roll":  [45, 135],
+  "exit_margin_deg": 8
+}
 ```
 
-**Arms overhead, not hands at the heart.** Overhead puts the forearm as far from
-the Mountain zero as it can get, which makes it the most separable pose on the
-arm we actually have — and "your arms are the branches" is a line worth having.
+`web/mock.js` mirrors that band, so the rehearsal path and the live path agree
+about what counts as held. If you retune one, retune the other.
+
+**One caveat on the band, from issue #3.** `pitch: [58, 88]` reaches into the
+region where Euler angles stop being separable: with 0.5° of real sensor noise,
+reported roll wobbles ±14° at 88° of pitch, which is wider than
+`exit_margin_deg: 8`. Near the top of that range the pose can flicker in and out
+while the body is perfectly still. If it does that on stage, narrow the pitch
+band rather than widening the exit margin.
 
 Two optional additive fields the UI uses if they turn up, and does without if
 they do not (§4 says unknown fields are ignored, never rejected):

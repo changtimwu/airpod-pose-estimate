@@ -43,7 +43,7 @@
     no_device:    ['No samples', 'Check the bud is banded and the AirPods are the audio output'],
     uncalibrated: ['Not zeroed', 'Stand in Mountain, arm hanging, then calibrate'],
     calibrating:  ['Reading your zero', 'Stand still. Arm down.'],
-    ready:        ['Zeroed', 'Raise both arms overhead to begin growing'],
+    ready:        ['Zeroed', 'Bend into Triangle to begin growing'],
     active:       ['Growing', 'Hold the pose. The tree builds while you do.'],
     complete:     ['Session complete', 'Your tree stands.'],
     __wilting:    ['Wilting', 'Find the pose again — nothing you grew is lost']
