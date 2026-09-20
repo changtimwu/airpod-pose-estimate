@@ -111,6 +111,9 @@ parts (quaternions, calibration, smoothing) that look like magic otherwise.
 - **Confirmed on real hardware** — AirPods Pro 2 on macOS 26: permission granted,
   50.0 Hz, steady 20.0 ms between samples, poses tracking correctly through the
   full pipeline. What the sensor gives us is no longer guesswork.
+- **Held-pose coach** — capture a pose by holding it, then get live distance,
+  hold timing and steadiness, with a left/right comparison at the end. See
+  [Demo: the held-pose coach](#demo-the-held-pose-coach).
 - **No hardware required** — `--source synthetic` drives the whole Python side
   with scripted fake motion, so teammates without compatible AirPods (and CI)
   can still work on everything above the driver.
@@ -289,6 +292,76 @@ airpod-pose gestures --source file --path data/samples/head-shake.jsonl --fast
 
 Because the wire format *is* the file format, a recording replays byte-for-byte
 what the live stream carried — which is why tuning against recordings works.
+
+## Demo: the held-pose coach
+
+The first thing here that is a *demo* rather than a tool. Built for
+[Trikonasana](https://github.com/changtimwu/airpod-pose-estimate/issues/3), but
+nothing in it is yoga-specific — it recognises any orientation you can hold.
+
+```bash
+make bundle                                              # once
+make capture NAME=mountain        LABEL="Mountain"       # stand up, hold 5 s
+make capture NAME=triangle_right  LABEL="Triangle (right)"
+make capture NAME=triangle_left   LABEL="Triangle (left)"
+make asana                                               # the coach
+```
+
+Each `capture` gives you five seconds to get into position, then averages a
+second of samples into a reference and reports how much you moved while it was
+recording — a reference captured while wobbling is one nobody can hit twice.
+
+`make asana` then shows, live:
+
+```
+  steadiness   4.2 deg/s  [############----]
+> Triangle (right)      6.1 deg [##################--]  [######----] 3.1/5.0s
+  Triangle (left)      88.4 deg [##------------------]
+  Mountain             71.2 deg [####----------------]
+
+   12.44s  ** HELD triangle_right for 5.0s, steadiness 4.2 deg/s
+```
+
+and on exit, the comparison that is the actual point:
+
+```
+--- session ---
+  Triangle (right)       held  11.4s   wobble  4.2 deg/s
+  Triangle (left)        held   9.8s   wobble  7.1 deg/s
+
+steadiest hold: Triangle (right) (4.2 deg/s)
+```
+
+### Why it is built this way
+
+**Poses are captured, not typed as angle ranges.** Euler bands break down exactly
+where yoga lives: with 0.5° of real noise, reported roll wobbles ±14° at 88° of
+pitch, so a band there thresholds noise ([sensor-notes.md](docs/sensor-notes.md)).
+Matching is `angle_between` against a captured quaternion — one number,
+continuous through vertical, no parameterisation to go singular. It also means
+nobody has to guess what "Triangle" is in degrees.
+
+**Steadiness is the signal that always works.** `‖rate‖` over the hold needs no
+reference, no calibration and no tuning, cannot drift, and does not care where
+the sensor is mounted. It is also the honest thing to report: it says what
+happened ("steadier on the right") instead of prescribing a target angle, which
+matters when the one thing this sensor cannot see is neck strain.
+
+**Nothing assumes a head.** An AirPod in an ear, banded to a forearm, or taped to
+a broom handle all work identically — calibrate a neutral, capture references,
+match. That keeps the demo alive whichever way the
+[placement question](https://github.com/changtimwu/airpod-pose-estimate/issues/3)
+lands.
+
+### Tuning without a body
+
+Everything runs off recordings and fake data too, so you can iterate on the
+couch:
+
+```bash
+airpod-pose asana --source file --path data/samples/head-shake.jsonl --fast
+airpod-pose asana --source synthetic --fast
+```
 
 ## Using it as a library
 

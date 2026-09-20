@@ -77,6 +77,21 @@ def build_parser() -> argparse.ArgumentParser:
     add_source_args(dump)
     add_pose_args(dump)
 
+    asana = sub.add_parser("asana", help="held-pose coach: capture references, match, time holds")
+    add_source_args(asana)
+    add_pose_args(asana)
+    asana.add_argument("--library", type=Path, help="pose library JSON (default: data/asanas.json)")
+    asana.add_argument("--capture", metavar="NAME",
+                       help="capture the pose you are holding and save it under NAME")
+    asana.add_argument("--label", help="human-readable name for --capture")
+    asana.add_argument("--cue", help="coaching note shown while in the pose")
+    asana.add_argument("--hold", type=float, default=5.0, help="seconds to hold (with --capture)")
+    asana.add_argument("--tolerance", type=float, default=20.0,
+                       help="degrees from the reference that still count (with --capture)")
+    asana.add_argument("--countdown", type=float, default=5.0,
+                       help="seconds to get into position before --capture records")
+    asana.add_argument("--list", action="store_true", help="show the library and exit")
+
     viz = sub.add_parser("viz", help="live 3D head-axes plot (needs matplotlib)")
     add_source_args(viz)
     add_pose_args(viz)
@@ -94,6 +109,7 @@ def main(argv: Optional[list] = None) -> int:
         "gestures": cmd_gestures,
         "dump": cmd_dump,
         "viz": cmd_viz,
+        "asana": cmd_asana,
     }
     try:
         return handlers[args.command](args)
@@ -237,6 +253,133 @@ def cmd_dump(args) -> int:
     finally:
         _close(source)
     return 0
+
+
+def cmd_asana(args) -> int:
+    from .asana import AsanaLibrary, AsanaMatcher, PoseTarget, capture_reference
+
+    library = AsanaLibrary.load(args.library)
+
+    if args.list:
+        if not len(library):
+            print("library is empty -- capture one with: airpod-pose asana --capture triangle_right")
+            return 1
+        print("%-20s %-22s %8s %8s" % ("NAME", "LABEL", "TOL", "HOLD"))
+        for target in library:
+            print("%-20s %-22s %6.0f deg %6.1fs" % (
+                target.name, target.label or "-", target.tolerance_deg, target.hold_s))
+        return 0
+
+    pipeline = _pipeline(args)
+    source = _open(args)
+    poses = pipeline.run(sources.samples(source, on_status=_print_status))
+
+    try:
+        if args.capture:
+            return _capture_pose(args, library, poses, capture_reference, PoseTarget)
+        if not len(library):
+            print("No poses captured yet. Hold a pose and run:\n"
+                  "  airpod-pose asana --capture triangle_right --label 'Triangle (right)'")
+            return 1
+        return _run_coach(library, poses, AsanaMatcher)
+    finally:
+        _close(source)
+
+
+def _capture_pose(args, library, poses, capture_reference, PoseTarget) -> int:
+    print("Get into the pose. Capturing in %.0fs ..." % args.countdown)
+    clock = _Clock()
+    start = None
+    for pose in poses:  # burn the countdown against device time, not wall time
+        if start is None:
+            start = pose.t
+        remaining = args.countdown - (pose.t - start)
+        if remaining <= 0:
+            break
+        print("\r  %.1fs ..." % remaining, end="", flush=True)
+    print("\r  hold still ...        ")
+
+    reference, spread = capture_reference(poses)
+    target = PoseTarget(
+        name=args.capture,
+        reference=reference,
+        label=args.label or args.capture.replace("_", " ").title(),
+        tolerance_deg=args.tolerance,
+        hold_s=args.hold,
+        cue=args.cue or "",
+    )
+    library.add(target)
+    path = library.save(args.library)
+    print("captured '%s' (moved %.1f deg during capture)" % (target.name, spread))
+    if spread > 10.0:
+        print("  warning: that is a lot of movement for a reference -- consider recapturing")
+    print("saved to %s (%d pose%s)" % (path, len(library), "" if len(library) == 1 else "s"))
+    return 0
+
+
+def _run_coach(library, poses, AsanaMatcher) -> int:
+    matcher = AsanaMatcher(library)
+    clock = _Clock()
+    lines_drawn = 0
+    last_draw = 0.0
+    try:
+        for pose in poses:
+            state, events = matcher.feed(pose)
+            for event in events:
+                if lines_drawn:
+                    print("\033[%dA\033[J" % lines_drawn, end="")
+                    lines_drawn = 0
+                print(_format_event(event, clock))
+            now = time.monotonic()
+            if now - last_draw < 0.06:
+                continue
+            last_draw = now
+            block = _format_coach(state, library)
+            if lines_drawn:
+                print("\033[%dA\033[J" % lines_drawn, end="")
+            print(block)
+            lines_drawn = block.count("\n") + 1
+    except KeyboardInterrupt:
+        pass
+    print("\n--- session ---")
+    for line in matcher.summary():
+        print("  " + line)
+    return 0
+
+
+def _format_event(event, clock) -> str:
+    if event.kind == "enter":
+        return "%s  -> entered %s (%.0f deg off)" % (clock(event.t), event.name, event.distance)
+    if event.kind == "hold":
+        return "%s  ** HELD %s for %.1fs, steadiness %.1f deg/s" % (
+            clock(event.t), event.name, event.duration, event.steadiness)
+    return "%s  <- left %s after %.1fs" % (clock(event.t), event.name, event.duration)
+
+
+def _format_coach(state, library) -> str:
+    rows = ["  steadiness %5.1f deg/s  %s" % (
+        state.steadiness, _meter(state.steadiness, 30.0, 16, invert=True))]
+    for target in library:
+        distance = state.distances.get(target.name, 999.0)
+        active = state.current == target.name
+        marker = ">" if active else " "
+        bar = _meter(distance, max(target.tolerance_deg * 3, 1.0), 20, invert=True)
+        row = "%s %-18s %6.1f deg %s" % (marker, target.label or target.name, distance, bar)
+        if active:
+            row += "  %s %.1f/%.1fs" % (
+                _meter(state.progress, 1.0, 10), state.elapsed, state.hold_s)
+            if state.completed:
+                row += "  HELD"
+        rows.append(row)
+    return "\n".join(rows)
+
+
+def _meter(value: float, full: float, width: int, invert: bool = False) -> str:
+    frac = max(0.0, min(1.0, value / full if full else 0.0))
+    if invert:
+        frac = 1.0 - frac
+    filled = int(round(frac * width))
+    return "[" + "#" * filled + "-" * (width - filled) + "]"
 
 
 def cmd_viz(args) -> int:

@@ -3,7 +3,7 @@ VENV := .venv
 PY := $(VENV)/bin/python
 CONFIG ?= debug
 
-.PHONY: help setup build bundle test monitor synthetic doctor record viz clean
+.PHONY: help setup build bundle test monitor synthetic doctor record viz asana capture poses clean
 
 help:
 	@grep -E '^[a-z-]+:.*?## .*$$' $(MAKEFILE_LIST) | sed 's/:.*## /\t/' | expand -t22
@@ -33,6 +33,15 @@ synthetic: ## same readout, fake data, no hardware
 
 viz: ## live 3D plot from the AirPods
 	$(VENV)/bin/airpod-pose viz
+
+capture: ## capture the pose you are holding: make capture NAME=triangle_right LABEL="Triangle (right)"
+	$(VENV)/bin/airpod-pose asana --capture $(NAME) $(if $(LABEL),--label "$(LABEL)",) $(if $(HOLD),--hold $(HOLD),)
+
+asana: ## live held-pose coach against the captured library
+	$(VENV)/bin/airpod-pose asana
+
+poses: ## list the captured pose library
+	$(VENV)/bin/airpod-pose asana --list
 
 record: ## record a session: make record OUT=data/nod-01.jsonl
 	$(VENV)/bin/airpod-pose record --out $(or $(OUT),data/session.jsonl)

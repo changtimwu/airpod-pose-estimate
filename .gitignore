@@ -18,5 +18,9 @@ __pycache__/
 data/*.jsonl
 !data/samples/*.jsonl
 
+# captured pose references are personal: they depend on your body, your device
+# placement and your calibration, so they do not transfer between people
+data/asanas.json
+
 # macos
 .DS_Store
