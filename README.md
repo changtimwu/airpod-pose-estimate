@@ -3,11 +3,6 @@
 **Your AirPods already know which way your head is pointing. This repo turns
 that into a signal an app can act on.**
 
-<img width="2288" height="1144" alt="SCR-20260920-rhug" src="https://github.com/user-attachments/assets/86362b4f-8e97-4cce-99c2-ce4935e54270" />
-
-
-
-
 ---
 
 ## The idea in one minute
