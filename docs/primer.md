@@ -73,6 +73,12 @@ quat.rotate_vector(q, quat.FORWARD) # where is the nose pointing?
 Sign conventions are pinned at the top of that module and enforced by tests:
 yaw+ = turning left, pitch+ = looking up, roll+ = tilting right.
 
+This is not just theory: with the head near vertical, two poses whose yaw and
+roll differ by 10 deg each can be **0.17 deg apart physically**. If your app has
+steep head positions in it, classify with `angle_between` or by where a body
+axis points, never with a threshold on yaw or roll. Numbers in
+[sensor-notes.md](sensor-notes.md).
+
 ## 3. Calibration: what "straight ahead" means
 
 When the stream starts, CoreMotion invents a reference frame. It is not

@@ -32,6 +32,7 @@ IMU and will report `isDeviceMotionAvailable == false`.
 | `rot` | Gyroscope rotation rate | rad/s |
 | `acc` | Acceleration with gravity removed | g |
 | `grav` | Gravity direction in the body frame | g |
+| `loc` | Which bud produced the sample: `left`, `right`, `default` | - |
 
 Attitude is already sensor-fused by the OS, so we are not writing a Madgwick
 filter. Yaw still drifts (no magnetometer reference we can trust), which is why
@@ -58,27 +59,60 @@ Note the pitch sign is flipped relative to textbook aerospace Z-Y-X so that
 a demo: run `airpod-pose monitor`, turn your head left, and confirm yaw goes
 positive. A flipped axis is a 20-minute bug if you find it late.
 
+## Steep and inverted poses: do not threshold Euler angles
+
+Relevant to anything with the head far from level -- downward dog, cobra,
+forward folds, headstands. As pitch approaches vertical, yaw and roll stop being
+separable. Measured with our own math:
+
+| head pitch | Euler difference between two poses | actual rotation between them |
+| --- | --- | --- |
+| 0 deg | yaw +10, roll -10 | 14.1 deg |
+| 45 deg | yaw +10, roll -10 | 7.6 deg |
+| 80 deg | yaw +10, roll -10 | 1.7 deg |
+| 89 deg | yaw +10, roll -10 | **0.17 deg** |
+
+At 89 deg, a 14-degree difference on paper is a sixth of a degree in reality. A
+threshold on yaw or roll there fires on noise, and the angle will swing wildly
+between frames while the head barely moves.
+
+Two things that stay well behaved everywhere, and what to build classifiers on:
+
+```python
+quat.angle_between(reference_pose, current)      # "how far from the target pose?"
+quat.rotate_vector(pose.q, quat.FORWARD)         # "where does the nose point?"
+```
+
+The second is usually what a pose rule actually means. "Chin tucked" is the nose
+vector's elevation; "head square to the mat" is its horizontal bearing. Both are
+single numbers, both are continuous through vertical, neither cares about the
+Euler parameterisation.
+
 ## Known gotchas
 
 - **The audio route, not the Bluetooth connection, is what matters.** Samples
   only arrive while the AirPods are the *selected output device*. Connected but
   idle is not enough, and they auto-switch away to an iPhone without telling you.
   Check with `system_profiler SPAudioDataType | grep -B4 "Default Output Device: Yes"`.
-- **Both buds.** Motion comes from whichever bud Apple decides is primary, and
-  that can switch mid-session (for example when you take one out). Expect an
-  orientation discontinuity; nothing tells you it happened. **Verify** how bad
-  this is before building anything precise.
-- **Permission, and who asks for it.** macOS gates this behind Motion & Fitness
-  in TCC. Two things have to be true, and we got both wrong at first:
-  1. The binary must be **bundled and signed** (`make bundle`) -- a bare SwiftPM
-     binary has no identity to attach a grant to.
-  2. It must be **launched through LaunchServices** (`open Foo.app --args ...`),
-     not from a terminal. TCC attributes the request to the *responsible*
-     process, and a terminal-launched child inherits the terminal's context
-     instead of asking for itself. Measured: launched from a shell it sits at
-     `authorization=notDetermined` and receives zero samples indefinitely;
-     launched via `open`, the grant appears and samples flow.
-  Because LaunchServices owns stdout, the app mirrors its stream to UDP and the
-  Python side reads that back. `sources.AppSource` does all of this for you.
+- **Both buds: you get one stream, not two.** Checked against the API and on
+  hardware. `CMHeadphoneMotionManager` has no call to select a bud or to open a
+  second stream -- there is exactly one `startDeviceMotionUpdates`. Each sample
+  carries `CMDeviceMotion.sensorLocation` (`default` / `headphoneLeft` /
+  `headphoneRight`), which we surface as the `loc` field, so you can *observe*
+  which bud is feeding you but not *choose*. Measured: 250 consecutive samples,
+  all `left`.
+
+  The source can switch mid-session (take a bud out, put it back, battery), and
+  the orientation can jump at that moment with nothing else announcing it. Watch
+  `loc` for a change if a pose estimate suddenly slews.
+
+  **And independent buds would not buy what you might hope.** Both are clamped
+  to the same rigid body -- your head -- about 15 cm apart. Two IMUs there give
+  you the same orientation twice; the only extra information is a lever-arm
+  difference in acceleration, which is buried in noise at this rate. It is not a
+  second joint, and it says nothing about torso, hips, shoulders or limbs. For
+  anything needing a second body segment, you need a second device: an iPhone at
+  the waist (CMMotionManager), an Apple Watch on the wrist, or a camera.
+
 - **Head vs. body.** The IMU cannot tell "turned my head" from "turned my whole
   body". If a demo depends on that distinction, it needs a second reference.

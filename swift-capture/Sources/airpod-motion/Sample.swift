@@ -32,6 +32,13 @@ struct MotionSample: Encodable {
     let acc: [Double]
     /// Gravity vector, g, [x, y, z].
     let grav: [Double]
+    /// Which bud produced this sample: "left", "right", or "default".
+    ///
+    /// CoreMotion delivers ONE fused stream, not one per bud, and picks the
+    /// source itself. This field is how you notice it switching mid-session --
+    /// which it does, e.g. when a bud is removed -- since the orientation can
+    /// jump at that moment with no other warning.
+    let loc: String
 
     struct Euler: Encodable {
         let roll: Double
@@ -53,6 +60,12 @@ struct MotionSample: Encodable {
         self.rot = [motion.rotationRate.x, motion.rotationRate.y, motion.rotationRate.z]
         self.acc = [motion.userAcceleration.x, motion.userAcceleration.y, motion.userAcceleration.z]
         self.grav = [motion.gravity.x, motion.gravity.y, motion.gravity.z]
+        switch motion.sensorLocation {
+        case .headphoneLeft: self.loc = "left"
+        case .headphoneRight: self.loc = "right"
+        case .default: self.loc = "default"
+        @unknown default: self.loc = "unknown"
+        }
     }
 }
 

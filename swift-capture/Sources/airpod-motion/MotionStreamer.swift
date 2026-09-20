@@ -38,6 +38,15 @@ final class MotionStreamer: NSObject, CMHeadphoneMotionManagerDelegate {
                 return
             }
             guard let motion else { return }
+            if self.seq == 0 {
+                // The status emitted at start-up reads the authorization before
+                // CoreMotion has resolved it, so it can say notDetermined on a
+                // run that is in fact authorized. Re-report once data proves it.
+                self.emit(.status(StatusEvent(
+                    "streaming",
+                    detail: "authorization=\(self.authorizationDescription()) sensor=\(motion.sensorLocation.rawValue == 1 ? "left" : motion.sensorLocation.rawValue == 2 ? "right" : "default")"
+                )))
+            }
             self.seq += 1
             self.emit(.sample(MotionSample(motion: motion, seq: self.seq)))
             if let limit = self.maxSamples, self.seq >= limit {

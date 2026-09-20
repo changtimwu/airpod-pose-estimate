@@ -236,6 +236,12 @@ Notes that will save you time:
   reference frame — handy for eyeballing, not for logic.
 - **Every record carries `type`.** `header` once, `status` on connect /
   disconnect / error, `sample` for data. Filter before parsing.
+- **`loc` tells you which bud the sample came from** (`left` / `right` /
+  `default`). CoreMotion delivers one fused stream and picks the source itself;
+  it can switch mid-session, and the orientation may jump when it does. The
+  committed sample above predates this field, so live streams have one more key
+  than that excerpt shows. There is no way to read both buds at once -- see
+  [docs/sensor-notes.md](docs/sensor-notes.md).
 
 ### What movement actually looks like
 
