@@ -6,7 +6,8 @@ build-backend = "setuptools.build_meta"
 name = "airpod-pose"
 version = "0.1.0"
 description = "Head-pose estimation from AirPods motion sensors (hackathon skeleton)"
-readme = "../README.md"
+# No `readme`: the real one lives at the repo root, and setuptools refuses to
+# read a file outside the project directory.
 requires-python = ">=3.9"
 dependencies = []
 
