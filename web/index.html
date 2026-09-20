@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asana Coach</title>
+<!--
+  SCAFFOLD. docs/yoga/00-build-plan.md assigns web/ to Interface + Experience,
+  and this is deliberately one self-contained file with no app.js or style.css
+  so it collides with nothing they own. Replace it freely.
+
+  It exists because server.py serves web/index.html and web/ did not exist, so
+  `GET /` was a 404 and the bridge had no visible output at all.
+
+  Contract: GET /stream (SSE frames, docs/yoga/01-wire-contract.md) and
+  POST /command {"cmd": "calibrate"|"start"|"skip"|"reset"}. No dependencies --
+  hackathon wifi is not a build step.
+-->
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #171b22;
+    --line: #262c36;
+    --text: #e8edf4;
+    --dim: #8b95a5;
+    --good: #35d07f;
+    --warn: #ffb547;
+    --bad: #ff5f56;
+    --accent: #5b9dff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
+    min-height: 100vh; padding: 24px;
+  }
+  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
+  #status {
+    font-size: 13px; padding: 4px 12px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--line); color: var(--dim);
+    text-transform: uppercase; letter-spacing: 0.08em;
+  }
+  #status[data-status="active"] { color: var(--good); border-color: var(--good); }
+  #status[data-status="calibrating"] { color: var(--warn); border-color: var(--warn); }
+  #status[data-status="no_device"] { color: var(--bad); border-color: var(--bad); }
+  .spacer { flex: 1; }
+  button {
+    font: inherit; font-size: 14px; padding: 8px 16px; border-radius: 8px;
+    background: var(--panel); color: var(--text);
+    border: 1px solid var(--line); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  main { display: grid; grid-template-columns: minmax(280px, 400px) 1fr; gap: 20px; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+  .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); }
+  #poseEn { font-size: 40px; font-weight: 680; letter-spacing: -0.02em; margin: 6px 0 0; }
+  #poseSa { font-size: 18px; color: var(--dim); font-style: italic; margin: 0 0 20px; }
+  .bar { height: 14px; border-radius: 999px; background: #0b0e13; overflow: hidden; border: 1px solid var(--line); }
+  .bar > div { height: 100%; width: 0%; background: var(--accent); transition: width 90ms linear; }
+  #holdBar > div { background: var(--warn); }
+  body[data-match="true"] #holdBar > div { background: var(--good); }
+  .readouts { display: flex; gap: 28px; margin-top: 20px; flex-wrap: wrap; }
+  .readout b { display: block; font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  #seq { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px; }
+  .chip {
+    font-size: 13px; padding: 5px 12px; border-radius: 999px;
+    border: 1px solid var(--line); color: var(--dim);
+  }
+  .chip[data-state="current"] { color: var(--text); border-color: var(--accent); }
+  .chip[data-state="done"] { color: var(--good); border-color: var(--good); }
+  svg { width: 100%; height: auto; display: block; }
+  #armLine { stroke: var(--accent); transition: stroke 120ms; }
+  body[data-match="true"] #armLine { stroke: var(--good); }
+  #hint { margin-top: 14px; color: var(--dim); font-size: 14px; min-height: 1.5em; }
+  .posePanel { display: flex; gap: 20px; align-items: flex-start; }
+  .poseMain { flex: 1; min-width: 0; }
+  .axes { width: 190px; flex: none; text-align: center; }
+  .axes svg { width: 100%; }
+  .axesKey { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); }
+  .axesKey span { display: flex; align-items: center; gap: 7px; }
+  .axesKey i { width: 11px; height: 3px; border-radius: 2px; }
+  .axesNote { font-size: 11px; color: var(--dim); text-align: left; margin: 12px 0 0; line-height: 1.45; }
+  @media (max-width: 980px) { .posePanel { flex-direction: column; } .axes { width: 100%; max-width: 260px; } }
+</style>
+</head>
+<body data-match="false">
+<header>
+  <h1>Asana Coach</h1>
+  <span id="status" data-status="offline">connecting</span>
+  <span class="spacer"></span>
+  <button data-cmd="calibrate">Calibrate</button>
+  <button data-cmd="start">Start</button>
+  <button data-cmd="skip">Skip</button>
+  <button data-cmd="reset">Reset</button>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="label">Orientation</div>
+    <svg viewBox="0 0 200 200" aria-label="arm orientation">
+      <circle cx="100" cy="100" r="88" fill="none" stroke="#262c36" stroke-width="1"/>
+      <circle cx="100" cy="100" r="60" fill="none" stroke="#1d232c" stroke-width="1"/>
+      <line x1="12" y1="100" x2="188" y2="100" stroke="#1d232c" stroke-width="1"/>
+      <line x1="100" y1="12" x2="100" y2="188" stroke="#1d232c" stroke-width="1"/>
+      <g id="armGroup" transform="rotate(0 100 100)">
+        <line id="armLine" x1="100" y1="100" x2="100" y2="22" stroke-width="9" stroke-linecap="round"/>
+        <circle cx="100" cy="100" r="7" fill="#e8edf4"/>
+      </g>
+    </svg>
+    <div class="readouts">
+      <div class="readout"><span class="label">Pitch</span><b id="pitch">–</b></div>
+      <div class="readout"><span class="label">Roll</span><b id="roll">–</b></div>
+      <div class="readout"><span class="label">Yaw</span><b id="yaw">–</b></div>
+    </div>
+  </section>
+
+  <section class="panel posePanel">
+   <div class="poseMain">
+    <div class="label">Target pose</div>
+    <h2 id="poseEn">–</h2>
+    <p id="poseSa"></p>
+
+    <div class="label">Hold</div>
+    <div class="bar" id="holdBar"><div></div></div>
+    <div class="readouts">
+      <div class="readout"><span class="label">Held</span><b id="held">0.0s</b></div>
+      <div class="readout"><span class="label">Error</span><b id="error">–</b></div>
+      <div class="readout"><span class="label">Score</span><b id="score">0%</b></div>
+    </div>
+
+    <div class="label" style="margin-top:20px">Sequence</div>
+    <div id="seq"></div>
+    <div id="hint"></div>
+   </div>
+
+   <aside class="axes">
+     <div class="label">Sensor axes</div>
+     <svg viewBox="0 0 160 160" aria-label="live device axes">
+       <!-- faint ground diamond, so the rotation reads as 3D -->
+       <polygon points="80,50 132,80 80,110 28,80" fill="none" stroke="#1d232c" stroke-width="1"/>
+       <g id="axes3d"></g>
+     </svg>
+     <div class="axesKey">
+       <span><i style="background:#ff5f56"></i>forward</span>
+       <span><i style="background:#35d07f"></i>left</span>
+       <span><i style="background:#5b9dff"></i>up</span>
+     </div>
+     <p class="axesNote">The IMU reports one orientation. Everything above is
+     derived from these three axes.</p>
+   </aside>
+  </section>
+</main>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  const deg = (v) => (v === null || v === undefined) ? "–" : v.toFixed(0) + "°";
+
+  document.querySelectorAll("button[data-cmd]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      fetch("/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cmd: btn.dataset.cmd }),
+      }).catch(() => {});
+    });
+  });
+
+  const HINTS = {
+    uncalibrated: "Stand in a neutral position and press Calibrate.",
+    calibrating: "Hold still …",
+    ready: "Press Start when you are ready.",
+    active: "",
+    complete: "Sequence complete.",
+    no_device: "No samples arriving — are the AirPods the selected audio output?",
+  };
+
+  // Rebuild the rotation from the Euler angles the frame carries, using the
+  // convention pinned in quaternion.py: intrinsic Z-Y-X, with pitch negated so
+  // that positive means nose-up. If the frame ever carries `q` directly, drop
+  // this and use it -- the quaternion is the real source of truth.
+  function rotationFrom(yaw, pitch, roll) {
+    const r = (d) => (d * Math.PI) / 180;
+    const cz = Math.cos(r(yaw)), sz = Math.sin(r(yaw));
+    const cy = Math.cos(r(-pitch)), sy = Math.sin(r(-pitch));
+    const cx = Math.cos(r(roll)), sx = Math.sin(r(roll));
+    return [
+      [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
+      [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
+      [-sy,     cy * sx,                cy * cx],
+    ];
+  }
+
+  const AXES = [
+    { v: [1, 0, 0], color: "#ff5f56", label: "F" },  // nose
+    { v: [0, 1, 0], color: "#35d07f", label: "L" },  // left ear
+    { v: [0, 0, 1], color: "#5b9dff", label: "U" },  // crown
+  ];
+  const ISO = 46, CX = 80, CY = 80;
+
+  function project(v) {
+    // Isometric: x/y recede, z is screen-up.
+    return [
+      CX + (v[0] - v[1]) * 0.866 * ISO,
+      CY + ((v[0] + v[1]) * 0.5 - v[2]) * ISO,
+    ];
+  }
+
+  function drawAxes(yaw, pitch, roll) {
+    const R = rotationFrom(yaw, pitch, roll);
+    const drawn = AXES.map((axis) => {
+      const v = [0, 1, 2].map((i) =>
+        R[i][0] * axis.v[0] + R[i][1] * axis.v[1] + R[i][2] * axis.v[2]);
+      return { ...axis, v, depth: v[0] + v[1] + v[2] };
+    });
+    // Painter's algorithm: far axes first, so the near one overlaps it.
+    drawn.sort((a, b) => a.depth - b.depth);
+
+    $("axes3d").innerHTML = drawn.map((a) => {
+      const [x, y] = project(a.v);
+      const [lx, ly] = project(a.v.map((c) => c * 1.26));
+      return `<line x1="${CX}" y1="${CY}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"
+                   stroke="${a.color}" stroke-width="5" stroke-linecap="round"/>
+              <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" fill="${a.color}"
+                   font-size="13" font-weight="700" text-anchor="middle"
+                   dominant-baseline="central">${a.label}</text>`;
+    }).join("") + `<circle cx="${CX}" cy="${CY}" r="4.5" fill="#e8edf4"/>`;
+  }
+
+  function render(f) {
+    $("status").textContent = f.status.replace("_", " ");
+    $("status").dataset.status = f.status;
+    $("hint").textContent = HINTS[f.status] || "";
+
+    const arm = f.arm || {};
+    $("pitch").textContent = deg(arm.pitch);
+    $("roll").textContent = deg(arm.roll);
+    $("yaw").textContent = deg(arm.yaw);
+    // Pitch swings the arm from pointing down (-90) to straight up (+90);
+    // roll twists it. Enough to read a pose at a glance from across a room.
+    $("armGroup").setAttribute("transform", `rotate(${90 - (arm.pitch || 0)} 100 100)`);
+    drawAxes(arm.yaw || 0, arm.pitch || 0, arm.roll || 0);
+
+    const pose = f.pose || {};
+    const labels = (f.session && f.session.labels) || {};
+    const target = labels[pose.target] || {};
+    $("poseEn").textContent = target.en || pose.target || "–";
+    $("poseSa").textContent = target.sa || "";
+    document.body.dataset.match = String(!!pose.match);
+
+    const held = (pose.hold_ms || 0) / 1000, need = (pose.target_ms || 1) / 1000;
+    $("holdBar").firstElementChild.style.width =
+      Math.min(100, (held / need) * 100).toFixed(1) + "%";
+    $("held").textContent = held.toFixed(1) + "s";
+    $("error").textContent = pose.match ? deg(pose.error_deg) : "–";
+
+    const session = f.session || {};
+    $("score").textContent = Math.round((session.score || 0) * 100) + "%";
+
+    const seq = session.sequence || [];
+    if ($("seq").children.length !== seq.length) {
+      $("seq").innerHTML = "";
+      seq.forEach((id) => {
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = (labels[id] || {}).en || id;
+        $("seq").appendChild(chip);
+      });
+    }
+    [...$("seq").children].forEach((chip, i) => {
+      chip.dataset.state = i < session.index ? "done" : i === session.index ? "current" : "todo";
+    });
+  }
+
+  const stream = new EventSource("/stream");
+  stream.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch (_) {} };
+  stream.onerror = () => {
+    $("status").textContent = "reconnecting";
+    $("status").dataset.status = "offline";
+  };
+</script>
+</body>
+</html>

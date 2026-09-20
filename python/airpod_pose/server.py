@@ -199,7 +199,7 @@ class DeviceSource:
     def _run(self) -> None:
         try:
             from .pipeline import PosePipeline  # type: ignore
-            from .sources import open_source  # type: ignore
+            from .sources import open_source, samples as iter_samples  # type: ignore
         except Exception as exc:  # pragma: no cover - depends on repo internals
             self._error = (
                 f"could not import the capture pipeline ({exc}). "
@@ -214,8 +214,13 @@ class DeviceSource:
                 else open_source(self._source)
             )
             pipeline = PosePipeline()
-            for sample in stream:
-                pose = pipeline.update(sample)
+            # open_source returns a source object, not an iterable of Samples:
+            # iter_samples() drives its records() and filters out status lines.
+            # And the pipeline's method is feed(), not update() -- both of these
+            # raised into the broad except below, so the live path failed silently
+            # into an error string while --source scripted kept working.
+            for sample in iter_samples(stream):
+                pose = pipeline.feed(sample)
                 if pose is None:
                     continue
                 with self._lock:
