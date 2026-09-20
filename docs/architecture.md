@@ -1,5 +1,9 @@
 # Architecture
 
+New here? [primer.md](primer.md) walks the data path from sensor to gesture and
+explains the concepts; this document is about the file layout and why it is
+split the way it is.
+
 The point of this layout is that the risky part (getting trustworthy motion data
 off the AirPods) is isolated from the part we will rewrite ten times during the
 hackathon (what the app actually does with a head pose).
