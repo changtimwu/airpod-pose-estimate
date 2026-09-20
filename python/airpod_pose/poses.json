@@ -70,7 +70,8 @@
         15,
         90
       ],
-      "exit_margin_deg": 12
+      "exit_margin_deg": 12,
+      "mirror_roll": true
     },
     "side_angle": {
       "label_en": "Extended Side Angle",

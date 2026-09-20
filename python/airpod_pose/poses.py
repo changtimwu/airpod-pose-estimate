@@ -39,6 +39,11 @@ class PoseDef:
     pitch: Tuple[float, float]
     roll: Tuple[float, float]
     exit_margin_deg: float = 8.0
+    #: Accept the roll band mirrored about zero as well, so a pose that is the
+    #: same shape on either side -- side bends, twists -- matches both. A band
+    #: cannot express "either sign" on its own, and duplicating the pose under a
+    #: second id would make the flow ask which side you meant.
+    mirror_roll: bool = False
 
     @classmethod
     def from_dict(cls, pose_id: str, d: Dict) -> "PoseDef":
@@ -50,6 +55,7 @@ class PoseDef:
             pitch=(float(d["pitch"][0]), float(d["pitch"][1])),
             roll=(float(d["roll"][0]), float(d["roll"][1])),
             exit_margin_deg=float(d.get("exit_margin_deg", 8.0)),
+            mirror_roll=bool(d.get("mirror_roll", False)),
         )
 
     @property
@@ -61,7 +67,10 @@ class PoseDef:
         if not (self.pitch[0] - margin <= pitch <= self.pitch[1] + margin):
             return False
         if self.roll_constrained:
-            if not (self.roll[0] - margin <= roll <= self.roll[1] + margin):
+            if not any(
+                self.roll[0] - margin <= r <= self.roll[1] + margin
+                for r in self._roll_candidates(roll)
+            ):
                 return False
         return True
 
@@ -75,8 +84,13 @@ class PoseDef:
         d_pitch = pitch - (self.pitch[0] + self.pitch[1]) / 2.0
         if not self.roll_constrained:
             return abs(d_pitch)
-        d_roll = roll - (self.roll[0] + self.roll[1]) / 2.0
+        centre = (self.roll[0] + self.roll[1]) / 2.0
+        # Nearest side wins, so error falls smoothly whichever way you lean.
+        d_roll = min(abs(r - centre) for r in self._roll_candidates(roll))
         return math.hypot(d_pitch, d_roll)
+
+    def _roll_candidates(self, roll: float) -> Tuple[float, ...]:
+        return (roll, -roll) if self.mirror_roll else (roll,)
 
 
 @dataclass

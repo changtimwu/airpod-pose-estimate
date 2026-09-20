@@ -190,6 +190,7 @@ class DeviceSource:
 
     def __init__(self, source: str = "device", path: Optional[str] = None) -> None:
         self._latest: Optional[RawSample] = None
+        self._latest_at: float = 0.0
         self._lock = threading.Lock()
         self._source = source
         self._path = path
@@ -224,6 +225,7 @@ class DeviceSource:
                 if pose is None:
                     continue
                 with self._lock:
+                    self._latest_at = _now_ms()
                     self._latest = RawSample(
                         t=pose.t, pitch=pose.pitch, roll=pose.roll, yaw=pose.yaw
                     )
@@ -235,7 +237,16 @@ class DeviceSource:
         return self._error
 
     def sample(self, target_id: Optional[str], active: bool) -> Optional[RawSample]:
+        """The newest sample, or None once it is too old to believe.
+
+        Without the age check this returned the last sample forever, so a
+        stream that stopped -- which is what happens every time the AirPods
+        auto-switch to a phone -- looked exactly like someone holding perfectly
+        still. The session would keep scoring a frozen pose as a held one.
+        """
         with self._lock:
+            if self._latest is None or _now_ms() - self._latest_at > DEVICE_TIMEOUT_MS:
+                return None
             return self._latest
 
 
@@ -289,6 +300,10 @@ class Session:
         self._scores: List[float] = []
         self._last_sample_ms = 0.0
         self._device_seen = False
+        #: Separate from _started_ms, which is the flow clock and gets reset
+        #: when the sequence starts. This one only ever means "when did we begin
+        #: waiting for the first sample".
+        self._source_started_ms = _now_ms()
 
         self.arm = (MOUNTAIN_PITCH_DEG, 0.0, 0.0)
         self.pose_state = self._idle_pose_state()
@@ -394,10 +409,13 @@ class Session:
             now = _now_ms()
 
             if sample is None:
-                if self._device_seen and now - self._last_sample_ms > DEVICE_TIMEOUT_MS:
-                    if self.status != "no_device":
-                        self._emit("device_lost")
-                        self.status = "no_device"
+                # Either it stopped, or it never arrived at all. The second case
+                # used to sit silently at "uncalibrated" with quality "good",
+                # which tells a presenter nothing while Calibrate does nothing.
+                since = (now - self._last_sample_ms) if self._device_seen else (now - self._source_started_ms)
+                if since > DEVICE_TIMEOUT_MS and self.status != "no_device":
+                    self._emit("device_lost")
+                    self.status = "no_device"
                 return
 
             if self.status == "no_device":

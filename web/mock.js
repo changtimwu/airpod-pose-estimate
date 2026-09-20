@@ -24,7 +24,7 @@
      on the arm we have. */
   // Mirrors python/airpod_pose/poses.json "triangle" -- keep them in step, or
   // the rehearsal path and the live path disagree about what counts as held.
-  var BAND = { pitch: [-145, -35], roll: [15, 90], exit: 12 };
+  var BAND = { pitch: [-145, -35], roll: [15, 90], exit: 12, mirrorRoll: true };
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
@@ -105,8 +105,9 @@
 
     /* hysteresis: enter on the band, leave only on the band plus margin */
     var m = this.matched ? BAND.exit : 0;
+    var r = BAND.mirrorRoll ? Math.abs(this.roll) : this.roll;
     var inBand = this.pitch >= BAND.pitch[0] - m && this.pitch <= BAND.pitch[1] + m &&
-                 this.roll >= BAND.roll[0] - m && this.roll <= BAND.roll[1] + m;
+                 r >= BAND.roll[0] - m && r <= BAND.roll[1] + m;
 
     if (this.status === 'active') {
       if (inBand && !this.matched) this.emit({ event: 'pose_entered', pose: 'triangle' });

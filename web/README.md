@@ -53,22 +53,32 @@ one, so the screen and the sequence agree on exactly one thing to hold.
 "sequence": ["triangle"],
 "triangle": {
   "label_en": "Triangle", "label_sa": "Trikonasana",
-  "hold_ms": 6000,
-  "pitch": [58, 88],          // MEASURE THIS. Still a guess.
-  "roll":  [45, 135],
-  "exit_margin_deg": 8
+  "hold_ms": 5000,
+  "pitch": [-145, -35],       // level +/-55. NOTE the offset: server.py defines
+                              // the calibration pose as pitch -90, so a level
+                              // head reads -90, not 0.
+  "roll":  [15, 90],          // tilt toward a shoulder -- the real signal
+  "mirror_roll": true,        // ...either shoulder
+  "exit_margin_deg": 12
 }
 ```
 
 `web/mock.js` mirrors that band, so the rehearsal path and the live path agree
 about what counts as held. If you retune one, retune the other.
 
-**One caveat on the band, from issue #3.** `pitch: [58, 88]` reaches into the
-region where Euler angles stop being separable: with 0.5° of real sensor noise,
-reported roll wobbles ±14° at 88° of pitch, which is wider than
-`exit_margin_deg: 8`. Near the top of that range the pose can flicker in and out
-while the body is perfectly still. If it does that on stage, narrow the pitch
-band rather than widening the exit margin.
+**The band is for AirPods worn in the ears**, not a bud banded to a forearm.
+What it reads is the lateral line of the posture: tilt the head toward either
+shoulder and hold. Pitch is deliberately don't-care, so looking up or down
+during the bend does not drop the pose.
+
+`mirror_roll` exists because a band cannot express "either sign". The
+alternative was a second pose id per side, which would make the flow ask which
+side you meant. Nearest side wins for the error metric, so the target arc still
+tightens smoothly whichever way you lean.
+
+Keeping the head away from vertical is also what keeps this band trustworthy:
+near vertical, 0.5° of sensor noise turns into ±14° of reported roll (issue #3,
+`docs/sensor-notes.md`), which is wider than any sane exit margin.
 
 Two optional additive fields the UI uses if they turn up, and does without if
 they do not (§4 says unknown fields are ignored, never rejected):
