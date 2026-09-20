@@ -1,0 +1,20 @@
+# swift
+swift-capture/.build/
+*.xcuserstate
+.swiftpm/
+
+# app bundle produced by scripts/make_app_bundle.sh
+build/
+
+# python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# recordings (keep the directory, not the data -- add sessions you want to share explicitly)
+data/*.jsonl
+
+# macos
+.DS_Store
