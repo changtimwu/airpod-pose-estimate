@@ -11,7 +11,8 @@ AirPods Pro, AirPods 3+, AirPods Max and Beats Fit Pro each contain an IMU — a
 accelerometer and a gyroscope — that Apple put there for Spatial Audio, so the
 sound can stay anchored in place when you turn your head. iOS and macOS fuse
 those raw readings into an orientation estimate and hand it to any app through
-`CMHeadphoneMotionManager`, about 25 times a second.
+`CMHeadphoneMotionManager` — 50 times a second on the AirPods Pro 2 we
+tested, 25 Hz on older hardware.
 
 That means **anyone wearing modern AirPods is already wearing a head tracker**,
 and it has properties a camera does not:
@@ -52,10 +53,10 @@ The honest version, because it determines which demos are even possible:
 
 | We get | We do **not** get |
 | --- | --- |
-| Head orientation, ~25 Hz, already fused and fairly smooth | Position — no leaning distance, no walking, no reaching |
+| Head orientation at 25-50 Hz, already fused and fairly smooth | Position — no leaning distance, no walking, no reaching |
 | Reliable *relative* angles (vs. a calibrated forward) | Reliable *absolute* heading — yaw drifts, there is no compass anchor |
 | Rotation rates, good enough for nod/shake/tilt detection | Any way to tell "I turned my head" from "I turned my whole body" |
-| A signal that survives darkness, pockets and bad lighting | Fine timing — Bluetooth latency plus 25 Hz makes twitchy input mushy |
+| A signal that survives darkness, pockets and bad lighting | Fine timing — Bluetooth latency makes twitchy input mushy |
 
 So: gestures, dwell-based control, posture and attention tracking, head-steered
 views — all realistic. Anything needing a compass heading, a position in space,
@@ -97,8 +98,8 @@ parts (quaternions, calibration, smoothing) that look like magic otherwise.
 ## What works today
 
 - **Capture** — a Swift CLI (`airpod-motion`) streams fused head orientation
-  from `CMHeadphoneMotionManager` as newline-delimited JSON, ~25 Hz, to stdout
-  and/or a UDP endpoint.
+  from `CMHeadphoneMotionManager` as newline-delimited JSON (50 Hz measured on
+  AirPods Pro 2), to stdout and/or a UDP endpoint.
 - **Pose pipeline** — Python: calibration to a "straight ahead" reference frame,
   slerp smoothing on the quaternion, wrap-aware angle rates, out to a
   `HeadPose` stream (yaw / pitch / roll in degrees, plus deg/s).
@@ -107,6 +108,9 @@ parts (quaternions, calibration, smoothing) that look like magic otherwise.
   see [Where to start hacking](#where-to-start-hacking).
 - **Tooling** — record and replay sessions, a terminal readout, a live 3D plot,
   and a `doctor` command that tells you which part of the chain is broken.
+- **Confirmed on real hardware** — AirPods Pro 2 on macOS 26: permission granted,
+  50.0 Hz, steady 20.0 ms between samples, poses tracking correctly through the
+  full pipeline. What the sensor gives us is no longer guesswork.
 - **No hardware required** — `--source synthetic` drives the whole Python side
   with scripted fake motion, so teammates without compatible AirPods (and CI)
   can still work on everything above the driver.
@@ -123,7 +127,7 @@ parts (quaternions, calibration, smoothing) that look like magic otherwise.
 
 ```bash
 make setup      # venv + editable install of the python package
-make test       # 44 tests, no hardware needed
+make test       # 48 tests, no hardware needed
 make synthetic  # live-looking pose readout from fake data -- start here
 
 make bundle     # compile the Swift tool and wrap it in a .app (see below)
@@ -135,14 +139,34 @@ make viz        # live 3D head axes + angle history
 Put the AirPods in, make sure they are the **selected audio output** (not just
 connected), then `make doctor`.
 
-### The macOS permission wrinkle
+### Two macOS gotchas that cost us an afternoon
 
-AirPods motion is gated behind **Motion & Fitness** in TCC, and macOS only shows
-that prompt for a *bundled, signed* app. A bare `swift build` binary receives
-zero samples, forever, with no error. `make bundle` wraps the binary in a
-minimal ad-hoc-signed `AirPodMotion.app` so the prompt appears; the Python side
-prefers that bundled copy automatically. If you dismissed the prompt, re-enable
-it under **System Settings → Privacy & Security → Motion & Fitness**.
+Both are now handled in code, but you need to know they exist, because the
+failure mode for each is **silence** — no error, no samples, ever.
+
+**1. The permission needs a bundle *and* the right launcher.** AirPods motion is
+gated behind Motion & Fitness in TCC. Two conditions:
+
+- the binary must be bundled and ad-hoc signed (`make bundle`), and
+- it must be started by **LaunchServices** (`open Foo.app --args …`), not from a
+  terminal. TCC blames the *responsible* process for a request, and a
+  terminal-launched child inherits the terminal instead of asking for itself.
+
+Started from a shell, the tool sits at `authorization=notDetermined` forever.
+Started via `open`, the prompt appears, you click Allow, and samples flow.
+Because LaunchServices owns stdout, the app mirrors its stream to UDP and Python
+reads that back — `sources.AppSource` does all of it, and `make doctor` reports
+which path it took. If you dismissed the prompt, re-enable it under
+**System Settings → Privacy & Security → Motion & Fitness**.
+
+**2. Connected is not the same as selected.** Motion only arrives while the
+AirPods are the Mac's *active audio output*. Paired-but-idle gives you nothing,
+and they auto-switch to your iPhone without saying so — which is exactly how a
+working stream goes quiet mid-session. Check with:
+
+```bash
+system_profiler SPAudioDataType | grep -B4 "Default Output Device: Yes"
+```
 
 ## Layout
 
@@ -212,7 +236,8 @@ live stream carried.
 - No position, only orientation — leaning distance and walking are out.
 - Absolute yaw drifts; only relative angles are dependable. Re-calibrate often.
 - The IMU cannot distinguish "turned my head" from "turned my whole body".
-- ~25 Hz is fixed by the OS, so fast gestures are only ~8-12 samples long.
+- The rate is fixed by the OS (50 Hz measured here, 25 Hz on older hardware),
+  so a fast nod is only a couple of dozen samples long.
 - Motion can switch between buds mid-session, which shows up as an orientation
   jump with no notification.
 

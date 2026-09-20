@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import queue
 import sys
+import threading
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Iterator, Optional
 
 from . import sources
 from .gestures import GestureRecognizer
@@ -108,48 +110,48 @@ def main(argv: Optional[list] = None) -> int:
 
 
 def cmd_doctor(args) -> int:
-    print("1. locating capture binary ...", end=" ")
+    print("1. locating the capture tool ...", end=" ")
     try:
-        binary = sources.find_binary()
+        source = sources.DeviceSource()
     except sources.SourceError as exc:
         print("FAIL\n   %s" % exc)
         return 1
-    bundled = ".app/" in str(binary)
-    print("ok\n   %s" % binary)
-    if not bundled:
+    if source.strategy == "app":
+        print("ok\n   %s (launched via LaunchServices, mirrored over UDP)" % sources.APP_PATH)
+    else:
+        print("ok\n   %s" % sources.find_binary())
         print(
-            "   warning: this is the unbundled binary. macOS will not show the motion\n"
-            "   permission prompt for it, so you may get zero samples. Run `make bundle`."
+            "   warning: no app bundle, so the binary runs straight from this terminal.\n"
+            "   macOS will not prompt for motion permission that way and you will get\n"
+            "   zero samples. Run `make bundle`."
         )
 
     print("2. listening for %.0fs ..." % args.seconds)
-    source = sources.DeviceSource()
     count = 0
-    statuses = []
-    deadline = time.monotonic() + args.seconds
     try:
-        for record in source.records():
+        for record in _with_deadline(source, args.seconds):
             if record.get("type") == "status":
-                statuses.append(record)
                 print("   status: %s %s" % (record.get("event"), record.get("detail") or ""))
             else:
                 count += 1
-            if time.monotonic() > deadline:
-                break
     finally:
         source.close()
 
     print("3. result: %d samples in %.0fs (~%.1f Hz)" % (count, args.seconds, count / args.seconds))
     if count == 0:
         print(
-            "   No samples. Checklist:\n"
+            "   No samples. Checklist, in the order these actually go wrong:\n"
+            "     - AirPods are the SELECTED audio output, not merely connected\n"
+            "       (they auto-switch to your iPhone; play a sound to force the route back)\n"
+            "     - wearing them: some models stop reporting when idle or in the case\n"
+            "     - motion permission: System Settings > Privacy & Security > Motion & Fitness\n"
             "     - AirPods Pro / AirPods 3+ / AirPods Max / Beats Fit Pro (older models have no IMU)\n"
-            "     - connected AND selected as the audio output device\n"
-            "     - motion permission granted: System Settings > Privacy & Security > Motion & Fitness\n"
-            "     - run the bundled binary (`make bundle`) so the prompt can appear\n"
+            "     - `make bundle` after any Swift change: the .app holds a COPY of the binary\n"
             "   Meanwhile: `airpod-pose monitor --source synthetic` exercises everything above the driver."
         )
         return 1
+    print("   Now check the signs: `airpod-pose monitor`, turn your head left and")
+    print("   confirm yaw goes positive. See docs/sensor-notes.md.")
     return 0
 
 
@@ -198,7 +200,7 @@ def cmd_monitor(args) -> int:
                     print("\r%s  %-10s conf=%.2f  %s" % (
                         _clock(event.t), event.name, event.confidence, event.detail))
             now = time.monotonic()
-            if now - last_draw > 0.05:  # ~20 fps redraw, the stream is 25 Hz
+            if now - last_draw > 0.05:  # ~20 fps redraw; the stream is faster
                 print("\r" + _bars(pose), end="", flush=True)
                 last_draw = now
     finally:
@@ -272,6 +274,37 @@ def _pipeline(args) -> PosePipeline:
         smoothing=args.smoothing,
         calibration_window=args.calibration_window,
     )
+
+
+def _with_deadline(source, seconds: float) -> Iterator[dict]:
+    """Yield records for `seconds`, then stop -- even if nothing ever arrives.
+
+    A silent stream is the normal failure here (AirPods connected but not the
+    selected output), and the naive `for record in source.records()` loop simply
+    blocks forever on the socket. Reading in a daemon thread bounds the wait for
+    every source type rather than just the one we happened to test.
+    """
+    inbox: "queue.Queue" = queue.Queue()
+
+    def reader() -> None:
+        try:
+            for record in source.records():
+                inbox.put(record)
+        except Exception as exc:  # surfaced below; the thread must not die silently
+            inbox.put({"type": "status", "event": "error", "detail": str(exc)})
+
+    thread = threading.Thread(target=reader, daemon=True)
+    thread.start()
+
+    deadline = time.monotonic() + seconds
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        try:
+            yield inbox.get(timeout=min(remaining, 0.5))
+        except queue.Empty:
+            continue
 
 
 def _print_status(record) -> None:

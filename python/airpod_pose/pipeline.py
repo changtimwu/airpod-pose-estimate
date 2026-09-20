@@ -20,8 +20,8 @@ class PosePipeline:
     Parameters
     ----------
     smoothing:
-        Slerp coefficient, 0..1. Lower = smoother but laggier. 0.35 at 25 Hz is
-        roughly a 60 ms time constant, which felt like a sane starting point;
+        Slerp coefficient, 0..1. Lower = smoother but laggier. 0.35 is roughly a
+        30 ms time constant at 50 Hz (60 ms at 25 Hz), a sane starting point;
         tune it once we know whether the demo cares more about latency or calm.
     auto_calibrate:
         Use the first `calibration_window` samples as the reference frame. Handy

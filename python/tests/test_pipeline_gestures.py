@@ -21,7 +21,7 @@ def synthetic_poses(duration=12.0, **kwargs):
 def test_synthetic_source_emits_samples():
     records = list(sources.SyntheticSource(duration=2.0, realtime=False).records())
     samples = [r for r in records if r.get("type") == "sample"]
-    assert len(samples) == 50  # 2 s at 25 Hz
+    assert len(samples) == 100  # 2 s at the measured 50 Hz
     assert all(len(r["q"]) == 4 for r in samples)
 
 
@@ -31,7 +31,7 @@ def test_pipeline_yields_poses_after_calibration():
     assert all(isinstance(p, HeadPose) for p in poses)
     # The sample that completes the calibration window still yields a pose,
     # so only window-1 samples are consumed.
-    assert len(poses) == 100 - (5 - 1)
+    assert len(poses) == 200 - (5 - 1)
 
 
 def test_pipeline_starts_near_zero_after_calibration():
@@ -111,7 +111,7 @@ def test_file_replay_roundtrip(tmp_path):
     replayed = list(sources.FileSource(path, realtime=False).records())
     assert len(replayed) == len(records)
     poses = list(PosePipeline(calibration_window=5).run(sources.samples(sources.FileSource(path))))
-    assert len(poses) == 75 - (5 - 1)
+    assert len(poses) == 150 - (5 - 1)
 
 
 def _pose(t, yaw=0.0, pitch=0.0, roll=0.0, yaw_rate=0.0, pitch_rate=0.0, roll_rate=0.0):
@@ -136,3 +136,34 @@ def test_oscillation_event_reports_its_peak_rate():
     assert event is not None
     assert "peak_rate=200" in event.detail
     assert event.confidence > 0.0
+
+
+def test_device_source_prefers_the_app_bundle(monkeypatch):
+    """The bundle is the only path macOS will grant motion permission to."""
+    monkeypatch.setattr(sources, "find_app", lambda: sources.APP_PATH)
+    assert sources.DeviceSource().strategy == "app"
+
+
+def test_device_source_falls_back_to_the_binary(monkeypatch):
+    def no_app():
+        raise sources.SourceError("no bundle")
+
+    monkeypatch.setattr(sources, "find_app", no_app)
+    monkeypatch.setattr(sources, "find_binary", lambda: sources.REPO_ROOT / "fake")
+    assert sources.DeviceSource().strategy == "subprocess"
+
+
+def test_app_source_launches_with_a_udp_mirror(monkeypatch):
+    """`open` must carry --udp/--no-stdout, or the app streams where we cannot read it."""
+    monkeypatch.setattr(sources, "find_app", lambda: sources.APP_PATH)
+    calls = []
+    monkeypatch.setattr(sources.subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+
+    source = sources.AppSource(port=9999)
+    source.launch()
+    source.close()
+
+    launch = [c for c in calls if c and c[0] == "open"]
+    assert launch, "the app was never launched"
+    assert "--udp" in launch[0] and "127.0.0.1:9999" in launch[0]
+    assert "--no-stdout" in launch[0]

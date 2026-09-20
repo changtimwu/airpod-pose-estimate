@@ -33,6 +33,10 @@ this repo. What we receive per sample:
 | `grav` | which way gravity points, in head coordinates |
 | `t` | device timestamp, seconds — **use this, not arrival time** |
 
+The rate is whatever the OS decides: we measured a rock-steady **50 Hz**
+(20.0 ms between samples) on AirPods Pro 2 with macOS 26, while older hardware
+is widely reported at 25 Hz. Derive `dt` from `t` rather than assuming either.
+
 One caveat inherited from the physics: fusion fixes *pitch and roll* drift,
 because gravity gives an absolute reference for "down". Nothing gives an
 absolute reference for "north", so **yaw still drifts**. That single fact is why
@@ -107,15 +111,15 @@ One knob, `--smoothing` (alpha, 0–1):
 
 ```
 alpha = 0.6   snappy, still a bit jittery     <- gesture triggers
-alpha = 0.35  the default, ~60 ms of lag
+alpha = 0.35  the default, ~30 ms of lag at 50 Hz
 alpha = 0.15  glassy smooth, visibly laggy    <- viewers, posture tracking
 ```
 
-There is no free lunch here: smoothing *is* delay. And with only ~25 samples per
-second, a fast nod is 8–12 samples total — over-smooth it and the gesture is
-gone before the detector sees it. If the demo ever needs both calm visuals and
-fast triggers, run two pipelines with different alphas off the same source
-rather than compromising on one number.
+There is no free lunch here: smoothing *is* delay. A fast nod lasts a few tenths
+of a second — a couple of dozen samples at 50 Hz, half that on 25 Hz hardware —
+so over-smooth it and the gesture is gone before the detector sees it. If the
+demo ever needs both calm visuals and fast triggers, run two pipelines with
+different alphas off the same source rather than compromising on one number.
 
 ## 5. Sample → HeadPose → GestureEvent
 

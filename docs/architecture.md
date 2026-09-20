@@ -9,7 +9,7 @@ off the AirPods) is isolated from the part we will rewrite ten times during the
 hackathon (what the app actually does with a head pose).
 
 ```
-  AirPods (IMU, ~25 Hz)
+  AirPods (IMU, 25-50 Hz)
         |  Bluetooth, Apple's fusion
         v
   swift-capture/  airpod-motion            <- CoreMotion, Swift, macOS 14+
@@ -34,7 +34,7 @@ hackathon (what the app actually does with a head pose).
 
 `CMHeadphoneMotionManager` is the only way to read AirPods motion, and it is
 Objective-C/Swift only. Everything above the driver is easier to iterate on in
-Python, and a JSON-lines pipe between the two costs nothing at 25 Hz. It also
+Python, and a JSON-lines pipe between the two costs nothing at 50 Hz. It also
 buys three things we want for a hackathon:
 
 - **Recording is free.** The wire format is the file format, so

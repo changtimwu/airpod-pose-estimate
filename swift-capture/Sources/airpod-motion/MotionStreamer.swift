@@ -3,8 +3,8 @@ import Foundation
 
 /// Pulls CMDeviceMotion out of the AirPods and pushes JSON lines into a sink.
 ///
-/// Sample rate is fixed by the OS at ~25 Hz; there is no API to change it, so
-/// any smoothing or resampling belongs downstream.
+/// Sample rate is fixed by the OS -- there is no API to change it -- so any
+/// smoothing or resampling belongs downstream. 50 Hz measured on AirPods Pro 2 + macOS 26 (dead steady 20.0 ms gaps). Older devices/OS versions are widely reported at 25 Hz, and Apple guarantees nothing, so derive dt from the `t` field instead of hard-coding a rate.
 final class MotionStreamer: NSObject, CMHeadphoneMotionManagerDelegate {
     private let manager = CMHeadphoneMotionManager()
     private let sink: RecordSink

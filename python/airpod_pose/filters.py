@@ -1,6 +1,7 @@
 """Smoothing primitives.
 
-AirPods motion arrives at ~25 Hz and is already fused by the OS, so it is not
+AirPods motion arrives at 25-50 Hz depending on hardware, already fused by the
+OS, so it is not
 noisy in the IMU sense -- but it is jittery enough that raw angles look bad on
 screen and trip naive thresholds. Everything here is intentionally cheap and
 causal (no look-ahead), so the same code can run on a live stream and a replay.

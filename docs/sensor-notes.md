@@ -11,9 +11,12 @@ IMU and will report `isDeviceMotionAvailable == false`.
 
 ## Rate and latency
 
-- Sample rate is fixed at roughly **25 Hz**. There is no API to raise it, so
-  fast gestures are only ~8-12 samples long. Any smoothing has to be cheap or it
-  eats the whole gesture.
+- Sample rate is whatever the OS gives you and there is no API to change it.
+  **Measured here: 50.0 Hz, dead steady** (20.0 ms between samples, min 19.8 /
+  max 20.0 over a 6 s window) on AirPods Pro 2 with macOS 26. Older hardware is
+  widely reported at 25 Hz. Derive `dt` from `t`; never hard-code a rate.
+  Either way a fast gesture is only a few tenths of a second long, so smoothing
+  has to be cheap or it eats the whole gesture.
 - Bluetooth adds latency, empirically tens of milliseconds, and it is not
   constant. `CMDeviceMotion.timestamp` (our `t`) is the device clock, so use it
   -- not arrival time -- for anything rate-based.
@@ -57,12 +60,25 @@ positive. A flipped axis is a 20-minute bug if you find it late.
 
 ## Known gotchas
 
+- **The audio route, not the Bluetooth connection, is what matters.** Samples
+  only arrive while the AirPods are the *selected output device*. Connected but
+  idle is not enough, and they auto-switch away to an iPhone without telling you.
+  Check with `system_profiler SPAudioDataType | grep -B4 "Default Output Device: Yes"`.
 - **Both buds.** Motion comes from whichever bud Apple decides is primary, and
   that can switch mid-session (for example when you take one out). Expect an
   orientation discontinuity; nothing tells you it happened. **Verify** how bad
   this is before building anything precise.
-- **Permission.** macOS gates this behind Motion & Fitness in TCC, and the
-  prompt only appears for a bundled, signed app -- an unbundled SwiftPM binary
-  silently receives zero samples. Hence `make bundle`.
+- **Permission, and who asks for it.** macOS gates this behind Motion & Fitness
+  in TCC. Two things have to be true, and we got both wrong at first:
+  1. The binary must be **bundled and signed** (`make bundle`) -- a bare SwiftPM
+     binary has no identity to attach a grant to.
+  2. It must be **launched through LaunchServices** (`open Foo.app --args ...`),
+     not from a terminal. TCC attributes the request to the *responsible*
+     process, and a terminal-launched child inherits the terminal's context
+     instead of asking for itself. Measured: launched from a shell it sits at
+     `authorization=notDetermined` and receives zero samples indefinitely;
+     launched via `open`, the grant appears and samples flow.
+  Because LaunchServices owns stdout, the app mirrors its stream to UDP and the
+  Python side reads that back. `sources.AppSource` does all of this for you.
 - **Head vs. body.** The IMU cannot tell "turned my head" from "turned my whole
   body". If a demo depends on that distinction, it needs a second reference.

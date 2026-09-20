@@ -1,7 +1,7 @@
 # Demo ideas backlog
 
 We built the plumbing before picking the demo. This is the shortlist, scored on
-what the sensor can actually deliver: ~25 Hz fused orientation, reliable
+what the sensor can actually deliver: 25-50 Hz fused orientation, reliable
 relative angles, drifting absolute yaw, no position, no way to separate head
 rotation from body rotation.
 
@@ -22,8 +22,8 @@ rotation from body rotation.
 
 ## Possible, with caveats
 
-- **Gesture-based game input** (dodge, lean, aim). Fun, but 25 Hz and Bluetooth
-  latency make anything twitchy feel mushy. Prototype the latency first.
+- **Gesture-based game input** (dodge, lean, aim). Fun, but Bluetooth latency
+  makes anything twitchy feel mushy. Prototype the latency first.
 - **Sign / gesture vocabulary via a small classifier.** Record labelled sessions
   with `airpod-pose record`, train on windows of `HeadPose`. Realistic only if
   we collect data early -- budget an hour for recording.

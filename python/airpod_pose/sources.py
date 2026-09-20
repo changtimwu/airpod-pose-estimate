@@ -1,12 +1,23 @@
 """Where samples come from.
 
-Four interchangeable sources, all yielding the same newline-JSON records:
+Interchangeable sources, all yielding the same newline-JSON records:
 
-    DeviceSource     live AirPods, via the Swift `airpod-motion` subprocess
-    UDPSource        the same records arriving over UDP (capture on another Mac)
+    DeviceSource     live AirPods -- picks one of the two strategies below
+      AppSource        launches the .app bundle and reads it back over UDP
+      SubprocessSource runs the binary directly and reads its stdout
+    UDPSource        records arriving over UDP (capture on another Mac)
     FileSource       replay of a recorded .jsonl, optionally at real speed
     SyntheticSource  scripted fake motion -- lets the whole Python side be
                      developed and tested with no hardware and no AirPods
+
+Why two live strategies: macOS grants the Motion & Fitness permission to the
+*responsible* process, and a binary started from a terminal inherits the
+terminal's context instead of asking for itself. Measured on real hardware, that
+path stays stuck at `authorization=notDetermined` and receives zero samples
+forever. Launching the bundle through LaunchServices (`open`) makes the app
+responsible for itself, the prompt appears, and samples flow -- but then stdout
+belongs to LaunchServices, so the app mirrors its stream to UDP and we read that.
+Hence AppSource is the default whenever the bundle exists.
 """
 
 from __future__ import annotations
@@ -53,8 +64,27 @@ def find_binary() -> Path:
     )
 
 
-class DeviceSource:
-    """Runs the Swift capture tool and parses its stdout."""
+APP_PATH = REPO_ROOT / "build" / "AirPodMotion.app"
+#: Loopback port AppSource asks the app to mirror to. Only needs to be free.
+DEFAULT_APP_PORT = 9870
+
+
+def find_app() -> Path:
+    if APP_PATH.is_dir():
+        return APP_PATH
+    raise SourceError(
+        "%s not found. Run `make bundle` -- macOS only grants motion permission "
+        "to a bundled, LaunchServices-launched app." % APP_PATH
+    )
+
+
+class SubprocessSource:
+    """Runs the Swift capture tool directly and parses its stdout.
+
+    Simple, but on macOS it normally receives nothing: see the module docstring.
+    Kept for debugging the binary itself, and for any context where the process
+    already holds motion permission.
+    """
 
     def __init__(self, binary: Optional[Path] = None, extra_args: Iterable[str] = ()) -> None:
         self.binary = Path(binary) if binary else find_binary()
@@ -93,6 +123,88 @@ class DeviceSource:
             if stderr.strip():
                 print("[airpod-motion] " + stderr.strip(), file=sys.stderr)
         self.process = None
+
+
+class AppSource:
+    """Launch the bundled app via LaunchServices, read its UDP mirror.
+
+    The socket is bound *before* launching so no samples are lost in the gap,
+    and any previous instance is killed first: `open` on an already-running app
+    silently ignores the new --args, which would otherwise leave us listening to
+    a port nothing is sending to.
+    """
+
+    def __init__(self, app: Optional[Path] = None, port: int = DEFAULT_APP_PORT) -> None:
+        self.app = Path(app) if app else find_app()
+        self.port = port
+        self._socket: Optional[socket.socket] = None
+
+    def launch(self) -> None:
+        """Bind the port, then hand the app its arguments. Separated from
+        `records` so the launch can be tested without blocking on a socket."""
+        kill_running_app()
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self._socket.bind(("127.0.0.1", self.port))
+        self._socket.settimeout(10.0)
+        subprocess.run(
+            ["open", str(self.app), "--args", "--udp", "127.0.0.1:%d" % self.port, "--no-stdout"],
+            check=True,
+        )
+
+    def records(self) -> Iterator[Record]:
+        self.launch()
+        assert self._socket is not None
+        try:
+            while True:
+                try:
+                    payload, _ = self._socket.recvfrom(65535)
+                except socket.timeout:
+                    print(
+                        "[warn] no data for 10s. Are the AirPods the selected audio output? "
+                        "Check System Settings > Privacy & Security > Motion & Fitness.",
+                        file=sys.stderr,
+                    )
+                    continue
+                for line in payload.decode("utf-8", "replace").splitlines():
+                    record = _parse(line)
+                    if record is not None:
+                        yield record
+        finally:
+            self.close()
+
+    def close(self) -> None:
+        if self._socket is not None:
+            self._socket.close()
+            self._socket = None
+        kill_running_app()
+
+
+class DeviceSource:
+    """Live AirPods. Uses the app bundle when present, the raw binary otherwise."""
+
+    def __init__(self, port: int = DEFAULT_APP_PORT) -> None:
+        try:
+            self._inner = AppSource(port=port)
+            self.strategy = "app"
+        except SourceError:
+            self._inner = SubprocessSource()
+            self.strategy = "subprocess"
+
+    def records(self) -> Iterator[Record]:
+        return self._inner.records()
+
+    def close(self) -> None:
+        self._inner.close()
+
+
+def kill_running_app() -> None:
+    """Stop any capture app this repo started. Safe when none is running."""
+    subprocess.run(
+        ["pkill", "-f", "AirPodMotion.app/Contents/MacOS/airpod-motion"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 class UDPSource:
@@ -152,6 +264,9 @@ class SyntheticSource:
 
     Useful for two things: developing the Python side with no AirPods, and
     giving the gesture tests a signal with known ground truth.
+
+    The default rate matches what we measured off real AirPods Pro 2 (50 Hz), so
+    that a threshold tuned against synthetic data behaves the same on hardware.
     """
 
     #: (start_time, kind) -- kind is one of nod, shake, look_left, lean
@@ -165,7 +280,7 @@ class SyntheticSource:
     def __init__(
         self,
         duration: float = 12.0,
-        rate: float = 25.0,
+        rate: float = 50.0,
         realtime: bool = False,
         script: Optional[Sequence[tuple]] = None,
         noise: float = 0.3,
