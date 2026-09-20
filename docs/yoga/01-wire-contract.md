@@ -20,7 +20,7 @@ re-opens them. **D5 is the only genuine architectural call.**
 
 | ID | Decision | Default | Owner | Cost if changed late |
 |----|----------|---------|-------|----------------------|
-| D1 | Transport | WebSocket, JSON text frames, one connection | Bridge | Low |
+| D1 | Transport | **SSE** for state, `POST` for commands. Stdlib only, no pip install | Bridge | Low |
 | D2 | Host & port | `:8765` serves API *and* frontend — one origin, no CORS | Bridge | Low |
 | D3 | Angle units | **Settled: degrees.** `HeadPose` is already degrees, rates deg/s | — | — |
 | D4 | Axis convention | **Settled in `quaternion.py`**, unit-tested. See §2 | — | — |
@@ -31,7 +31,7 @@ re-opens them. **D5 is the only genuine architectural call.**
 | D9 | Calibration | **Partly settled:** `calibration.py` exists, `pipeline` auto-calibrates on first N samples. We add an explicit re-zero command | Signal | Medium |
 | D10 | Status vocabulary | Seven frozen strings (§6) | Bridge | Medium |
 | D11 | DOM contract | JS writes `data-*`, CSS reads them. Neither crosses | Interface + Experience | **High** |
-| D12 | Tuning surface | Bands in `poses.yaml`, hot-reloaded, never in code | Signal | Medium |
+| D12 | Tuning surface | Bands in `poses.json`, re-read on every command, never in code | Signal | Medium |
 
 ### On D5
 
@@ -96,8 +96,8 @@ AirPod  →BLE→  airpod-motion  →NDJSON→  sources.py → pipeline.py
                                               ↓ HeadPose
                                           poses.py  (new — Signal)
                                               ↓ PoseState
-                                          server/   (new — Bridge)
-                                              ↓ WebSocket
+                                          server.py (new — Bridge)
+                                              ↓ SSE + POST
                                           web/      (new — Interface + Experience)
 ```
 
@@ -112,11 +112,16 @@ AirPod  →BLE→  airpod-motion  →NDJSON→  sources.py → pipeline.py
 
 ## 4. Layer C — Bridge to browser
 
-Three message types server→client, one client→server. Every message carries `v`,
-`type` and `t`. **Unknown fields are ignored, never rejected**, so the schema can
-grow mid-hackathon without breaking anyone.
+Two message types server→client over **SSE** (`GET /stream`), one client→server as
+a plain **`POST /command`**. Every message carries `v`, `type` and `t`.
+**Unknown fields are ignored, never rejected**, so the schema can grow
+mid-hackathon without breaking anyone.
 
-### `frame` — server→client, ~25 Hz, full snapshot
+SSE rather than WebSocket because the package has **zero runtime dependencies**
+and we are keeping it that way: `EventSource` reconnects by itself, the server
+is stdlib `http.server`, and nobody runs `pip install` on four laptops.
+
+### `frame` — server→client via SSE, ~25 Hz, full snapshot
 
 Complete state every tick. The renderer never accumulates — it discards the
 previous frame and draws this one. No sync bugs are possible when there is
@@ -162,7 +167,7 @@ do not hand-roll a second serialiser.
 }
 ```
 
-### `event` — server→client, on transition only
+### `event` — server→client via SSE, on transition only
 
 One-shot triggers for animation and sound. Never carries state — if the client
 misses one, the next `frame` still corrects it. This split is what lets
@@ -190,10 +195,11 @@ Frozen event vocabulary:
 | `device_lost` | No samples for 1000 ms |
 | `device_found` | Samples resumed |
 
-### `command` — client→server
+### `command` — client→server, `POST /command`
 
 No correlation ids, no acks. The server acts and the next `frame` reflects it —
-which *is* the acknowledgement. Anything else is ceremony you do not have time for.
+which *is* the acknowledgement. Returns `200` if accepted, `409` if the command
+is invalid in the current status (e.g. `start` before calibrating).
 
 ```jsonc
 { "v":1, "type":"command", "cmd":"calibrate" }
@@ -215,8 +221,9 @@ hypotheses.** Owner 01 replaces them with measured values in the first ten
 minutes — the whole reason they live in YAML is so tuning needs no code change
 and no restart.
 
-```yaml
-# python/airpod_pose/poses.yaml — Signal owns this file, everyone reads the ids
+```jsonc
+// python/airpod_pose/poses.json — Signal owns this file, everyone reads the ids
+// JSON not YAML: stdlib has no YAML parser and we have zero dependencies.
 version: 1
 sequence: [mountain, warrior_ii, upward_salute, triangle, side_angle]
 
@@ -287,7 +294,7 @@ inventory for Owner 04.
 
 | Value | Meaning | What the user sees |
 |-------|---------|--------------------|
-| `disconnected` | WebSocket down | Reconnecting indicator, last frame greyed |
+| `disconnected` | SSE stream down (browser-only — the server never sends this) | Reconnecting indicator, last frame greyed |
 | `no_device` | Connected, no samples arriving | "Check the AirPod" + rig checklist |
 | `uncalibrated` | Samples arriving, no zero captured | Calibration invitation — the opening screen |
 | `calibrating` | Averaging the 2 s window | Countdown, "stand still, arm down" |
@@ -408,7 +415,7 @@ Source values are `device | udp | file | synthetic` — there is no `replay`.
 
 | Failure | Detected by | Behaviour — non-negotiable |
 |---------|-------------|----------------------------|
-| WebSocket drops | Browser | Reconnect every 1 s forever. Keep last frame on screen, dimmed. **Never blank the UI.** |
+| SSE drops | Browser | `EventSource` reconnects itself (`retry: 1000`). Keep last frame on screen, dimmed. **Never blank the UI.** |
 | No samples > 1 s | Bridge | `device_lost`, status `no_device`. Pipeline keeps running; do not exit. |
 | AirPods not active audio output | Signal | Same as above. The stream just goes quiet, nothing errors — `sensor-notes.md`. |
 | Bud swaps | Signal | `sensorLocation` changed → force `uncalibrated`. |
