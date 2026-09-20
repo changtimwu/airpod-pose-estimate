@@ -24,7 +24,7 @@
      on the arm we have. */
   // Mirrors python/airpod_pose/poses.json "triangle" -- keep them in step, or
   // the rehearsal path and the live path disagree about what counts as held.
-  var BAND = { pitch: [58, 88], roll: [45, 135], exit: 8 };
+  var BAND = { pitch: [-145, -35], roll: [15, 90], exit: 12 };
 
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
 
@@ -87,8 +87,8 @@
 
     /* assist snaps the arm into the middle of the band with a little life
        left in it — a perfectly still arm on screen reads as a frozen UI */
-    var tp = this.assist ? 76 + Math.sin(this.t * 1.7) * 5 : this.tgtPitch;
-    var tr = this.assist ? Math.sin(this.t * 1.1) * 11 : this.tgtRoll;
+    var tp = this.assist ? -90 + Math.sin(this.t * 1.7) * 6 : this.tgtPitch;
+    var tr = this.assist ? 42 + Math.sin(this.t * 1.1) * 8 : this.tgtRoll;
 
     var k = this.assist ? 0.24 : 0.2;
     this.pitch += (tp - this.pitch) * k + (Math.random() - 0.5) * 0.5;

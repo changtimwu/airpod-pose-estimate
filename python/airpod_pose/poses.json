@@ -61,16 +61,16 @@
     "triangle": {
       "label_en": "Triangle",
       "label_sa": "Trikonasana",
-      "hold_ms": 6000,
+      "hold_ms": 5000,
       "pitch": [
-        58,
-        88
+        -145,
+        -35
       ],
       "roll": [
-        45,
-        135
+        15,
+        90
       ],
-      "exit_margin_deg": 8
+      "exit_margin_deg": 12
     },
     "side_angle": {
       "label_en": "Extended Side Angle",

@@ -40,10 +40,10 @@
 
   var STATUS_COPY = {
     disconnected: ['Connection lost', 'Holding the last frame. Retrying every second.'],
-    no_device:    ['No samples', 'Check the bud is banded and the AirPods are the audio output'],
-    uncalibrated: ['Not zeroed', 'Stand in Mountain, arm hanging, then calibrate'],
-    calibrating:  ['Reading your zero', 'Stand still. Arm down.'],
-    ready:        ['Zeroed', 'Bend into Triangle to begin growing'],
+    no_device:    ['No samples', 'Check the AirPods are worn and are the selected audio output'],
+    uncalibrated: ['Not zeroed', 'Head level and facing forward, then calibrate'],
+    calibrating:  ['Reading your zero', 'Hold still. Head level.'],
+    ready:        ['Zeroed', 'Tilt your head toward your right shoulder to begin growing'],
     active:       ['Growing', 'Hold the pose. The tree builds while you do.'],
     complete:     ['Session complete', 'Your tree stands.'],
     __wilting:    ['Wilting', 'Find the pose again — nothing you grew is lost']
