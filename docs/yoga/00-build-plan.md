@@ -66,7 +66,7 @@ stage when the laptop faces a different wall.
    poses.py        classifier + hold timer + hysteresis      ◀── SIGNAL
         │
         ▼
-   server/         WebSocket fan-out + session state         ◀── BRIDGE
+   server.py       SSE fan-out + session state               ◀── BRIDGE
         │           also serves the frontend, same origin
         ▼
    web/            live arm dial, flow engine                ◀── INTERFACE
@@ -100,7 +100,7 @@ merge-conflict strategy, and at this timescale it is the only one that survives.
 The only person with the AirPods and a Mac. Owns hardware truth, so nobody else
 is ever blocked on it.
 
-- **Owns:** `python/airpod_pose/poses.py`, `poses.yaml`, and the calibration
+- **Owns:** `python/airpod_pose/poses.py`, `poses.json`, and the calibration
   command. Replaces the placeholder detectors in `gestures.py`.
 - **Builds:**
   - Explicit re-zero from Mountain pose
@@ -115,9 +115,9 @@ is ever blocked on it.
 
 ### 02 · BRIDGE — get it to the browser
 
-- **Owns:** `server/` entirely. FastAPI or aiohttp, whichever is already installed.
+- **Owns:** `python/airpod_pose/server.py`, `web/index.html` scaffold.
 - **Builds:**
-  - Reads the pipeline, fans out over WebSocket to any number of clients
+  - Reads the pipeline, fans out over SSE to any number of clients
   - Serves the frontend on the same origin — no CORS, no second port
   - `--source synthetic` passthrough so it runs with zero hardware
   - Auto-reconnect and a heartbeat
@@ -135,7 +135,7 @@ the thing is real.
 
 - **Owns:** `web/app.js`, `web/pose-dial.js`
 - **Builds:**
-  - WebSocket client with reconnect
+  - SSE client (`EventSource` reconnects itself)
   - Live arm dial — an SVG forearm that rotates with the real one
   - Target arc for the current pose, tightening as error shrinks
   - Hold ring that fills over the target duration
@@ -186,7 +186,7 @@ interface.
 
 ### 40–55 · Integrate
 
-Merge all four branches. Swap the frontend's fake source for the real WebSocket.
+Merge all four branches. Swap the frontend's fake source for the real `/stream`.
 Put the AirPods on and walk the flow end to end.
 
 **Expect the pose bands to be wrong on first contact.** That is Signal's
@@ -229,7 +229,7 @@ is a branch that dies with its battery.
 
 - **Nobody edits another owner's files.** Need a change? Ask them, in the room.
 - **The contract is frozen at T+05.** Add fields, never rename or remove.
-- **Pose bands live in YAML**, so tuning on stage needs no code change or restart.
+- **Pose bands live in `poses.json`**, re-read on every command — retune without restarting.
 - **No new dependencies after T+40.**
 
 ---
