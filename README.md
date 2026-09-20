@@ -1,4 +1,5 @@
-<img width="1142" height="601" alt="image" src="https://github.com/user-attachments/assets/ad3a2980-771f-4cb1-bd05-28e168e354bd" /># airpod-pose-estimate
+<img width="2314" height="1040" alt="image" src="https://github.com/user-attachments/assets/14856a91-c52b-45fa-9bf1-b8025c8467cd" />
+
 
 **Your AirPods already know which way your head is pointing. This repo turns
 that into a signal an app can act on.**
