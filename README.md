@@ -183,13 +183,106 @@ python/airpod_pose/
   cli.py           airpod-pose doctor|record|monitor|gestures|dump|viz
 docs/              primer, architecture, sensor notes and gotchas, demo backlog
 scripts/           app-bundle wrapper
-data/              recorded sessions (git-ignored)
+data/              your recordings (git-ignored); data/samples/ holds a committed one
 ```
 
 [docs/primer.md](docs/primer.md) walks the data path end to end and explains the
 concepts. [docs/architecture.md](docs/architecture.md) explains why it is split
 this way. [docs/sensor-notes.md](docs/sensor-notes.md) is the one to read before
 trusting a number: rate, drift, reference frames, and the traps.
+
+## What the data looks like
+
+Two levels, and you can inspect both. Everything below is a real excerpt from
+[`data/samples/head-shake.jsonl`](data/samples/head-shake.jsonl), recorded off
+AirPods Pro 2 on macOS 26 — it is committed, so you can replay it with no
+hardware at all.
+
+### Raw: one JSON object per line
+
+A recording opens with a header, then a status record, then samples at 50 Hz:
+
+```jsonl
+{"type": "header", "wall": 1789900918.214352, "label": "repeated head shakes, AirPods Pro 2 / macOS 26", "source": "device"}
+{"type": "status", "wall": 1789900918.334955, "event": "starting", "detail": "authorization=authorized"}
+{"wall": 1789900924.543288, "rot": [0.36711663007736206, -0.00919135008007288, -0.0627526342868805], "q": [0.9497065198316527, -0.08895600808170206, 0.155409124449585, -0.2568897769334656], "seq": 297, "grav": [0.2494824081659317, 0.24881017208099365, -0.9358696937561035], "t": 271850.6476515024, "acc": [0.002883113222196698, -0.008853279985487461, 0.05264042690396309], "euler": {"pitch": -14.407119037912313, "roll": 14.926678449495288, "yaw": -28.374699770984904}, "type": "sample"}
+```
+
+That third line is one sample. Rounded and reordered for reading:
+
+```json
+{
+  "type":  "sample",
+  "t":     271850.6477,                               // device clock, seconds
+  "wall":  1789900924.5433,                           // unix time, for aligning with other recordings
+  "seq":   297,                                       // sample counter; gaps mean dropped samples
+  "q":     [0.9497, -0.0890, 0.1554, -0.2569],        // attitude quaternion, [w, x, y, z]
+  "euler": {"yaw": -28.37, "pitch": -14.41, "roll": 14.93},  // CoreMotion's own angles, degrees
+  "rot":   [0.3671, -0.0092, -0.0628],                // gyro rotation rate, rad/s
+  "acc":   [0.0029, -0.0089, 0.0526],                 // acceleration minus gravity, g
+  "grav":  [0.2495, 0.2488, -0.9359]                  // gravity direction in head coordinates, g
+}
+```
+
+Notes that will save you time:
+
+- **Key order varies.** Swift's `JSONEncoder` does not promise field order, so
+  parse by name. `sources.py` already does.
+- **`t` is the device clock, not wall time.** Use it for anything rate-based —
+  Bluetooth delivery jitter lives in arrival time, not in `t`.
+- **`q` is the source of truth, `euler` is a convenience.** The pipeline derives
+  its own angles from `q` after calibration, with the sign conventions pinned in
+  `quaternion.py`. CoreMotion's `euler` is raw, uncalibrated, and uses its own
+  reference frame — handy for eyeballing, not for logic.
+- **Every record carries `type`.** `header` once, `status` on connect /
+  disconnect / error, `sample` for data. Filter before parsing.
+
+### What movement actually looks like
+
+The same recording, after calibration and smoothing, during one left-right swing
+(every 4th pose, so 80 ms per row):
+
+```
+ time    yaw    pitch    roll   yaw_rate
+ 0.00   -0.3     -9.3    +3.5      +16 deg/s
+ 0.08   +1.0     -7.7    +4.0      +18
+ 0.16   +2.8     -6.6    +3.2      +27
+ 0.24   +5.7     -6.2    +0.8      +38     <- turning one way
+ 0.32   +7.3     -5.4    -1.0       +7     <- momentarily still
+ 0.40   +6.8     -5.0    -0.5      -12
+ 0.48   +5.3     -5.3    +1.3      -24
+ 0.56   +2.9     -6.8    +2.6      -34     <- coming back
+ 0.64   -0.2     -9.7    +2.5      -41
+ 0.72   -4.3    -13.6    -0.0      -61
+```
+
+That sign change in `yaw_rate` is exactly what `OscillationDetector` counts: a
+shake is several of them inside about a second, while turning to look at
+something is one crossing and then a hold.
+
+### Derived: the `HeadPose` stream
+
+`airpod-pose dump` emits the calibrated, smoothed poses application code
+consumes — one per line, ready to pipe into anything:
+
+```bash
+airpod-pose dump --source file --path data/samples/head-shake.jsonl --fast
+```
+
+```jsonl
+{"t": 271850.9277, "q": [0.9388, 0.0112, 0.2599, -0.2259], "yaw": -28.743, "pitch": -29.5353, "roll": -6.3661, "yaw_rate": 5.1083, "pitch_rate": -6.6594, "roll_rate": -2.6382}
+{"t": 271850.9476, "q": [0.9388, 0.0116, 0.2606, -0.2249], "yaw": -28.6081, "pitch": -29.638, "roll": -6.3026, "yaw_rate": 6.7537, "pitch_rate": -5.1435, "roll_rate": 3.1764}
+```
+
+### Replay the sample, no AirPods required
+
+```bash
+airpod-pose monitor  --source file --path data/samples/head-shake.jsonl   # watch it in real time
+airpod-pose gestures --source file --path data/samples/head-shake.jsonl --fast
+```
+
+Because the wire format *is* the file format, a recording replays byte-for-byte
+what the live stream carried — which is why tuning against recordings works.
 
 ## Using it as a library
 
@@ -219,7 +312,8 @@ Tuning thresholds against a live head is miserable — record once, iterate offl
 ```
 
 The wire format is the file format, so a recording is byte-for-byte what the
-live stream carried.
+live stream carried — see [What the data looks like](#what-the-data-looks-like)
+for an annotated excerpt.
 
 ## Where to start hacking
 

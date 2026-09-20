@@ -190,6 +190,7 @@ def cmd_monitor(args) -> int:
     recognizer = None if args.no_gestures else GestureRecognizer()
     source = _open(args)
     last_draw = 0.0
+    clock = _Clock()
     try:
         for sample in sources.samples(source, on_status=_print_status):
             pose = pipeline.feed(sample)
@@ -198,7 +199,7 @@ def cmd_monitor(args) -> int:
             if recognizer is not None:
                 for event in recognizer.feed(pose):
                     print("\r%s  %-10s conf=%.2f  %s" % (
-                        _clock(event.t), event.name, event.confidence, event.detail))
+                        clock(event.t), event.name, event.confidence, event.detail))
             now = time.monotonic()
             if now - last_draw > 0.05:  # ~20 fps redraw; the stream is faster
                 print("\r" + _bars(pose), end="", flush=True)
@@ -214,12 +215,13 @@ def cmd_gestures(args) -> int:
     recognizer = GestureRecognizer()
     source = _open(args)
     count = 0
+    clock = _Clock()
     try:
         for pose in pipeline.run(sources.samples(source, on_status=_print_status)):
             for event in recognizer.feed(pose):
                 count += 1
                 print("%s  %-10s conf=%.2f  %s" % (
-                    _clock(event.t), event.name, event.confidence, event.detail))
+                    clock(event.t), event.name, event.confidence, event.detail))
     finally:
         _close(source)
     print("%d events" % count, file=sys.stderr)
@@ -311,8 +313,21 @@ def _print_status(record) -> None:
     print("[status] %s %s" % (record.get("event"), record.get("detail") or ""), file=sys.stderr)
 
 
-def _clock(t: float) -> str:
-    return "%7.2fs" % t
+class _Clock:
+    """Prints time since the first event, not CoreMotion's device clock.
+
+    `t` is an uptime counter in the hundreds of thousands of seconds, which is
+    the right thing to compute with and useless to read -- especially on a
+    replay, where it belongs to whenever the recording happened.
+    """
+
+    def __init__(self) -> None:
+        self.start: Optional[float] = None
+
+    def __call__(self, t: float) -> str:
+        if self.start is None:
+            self.start = t
+        return "%7.2fs" % (t - self.start)
 
 
 def _bars(pose: HeadPose, width: int = 21) -> str:

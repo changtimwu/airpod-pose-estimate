@@ -13,8 +13,10 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 
-# recordings (keep the directory, not the data -- add sessions you want to share explicitly)
+# your own recordings stay local; data/samples/ is checked in on purpose, so
+# everyone can replay real hardware data without owning the hardware
 data/*.jsonl
+!data/samples/*.jsonl
 
 # macos
 .DS_Store
