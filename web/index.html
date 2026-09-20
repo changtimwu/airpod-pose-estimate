@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tree — AirPod Yoga</title>
+<!--
+  Owner 04 · EXPERIENCE. Replaces the Bridge scaffold, keeping its transport:
+  SSE on /stream, commands as POST /command.
+
+  DOM contract, §8 of docs/yoga/01-wire-contract.md — frozen:
+    #arm-dial  #hold-ring  #pose-name  #pose-sanskrit  #status-banner
+    #score-value  #sequence-rail  #btn-calibrate  #btn-start  #btn-skip
+
+  #sequence-rail is repurposed, not renamed: one pose, so the rail tracks
+  growth stages instead of a pose sequence. Same id, same owner, no rename.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body data-status="uncalibrated" data-pose="tree" data-match="false" data-quality="good" data-stage="seed" data-source="mock">
+
+<!-- ───────────────────────── scene ───────────────────────── -->
+<div class="stage" aria-hidden="true">
+  <svg id="scene" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <radialGradient id="g-dawn" cx="50%" cy="86%" r="74%">
+        <stop offset="0%"   class="s-dawn-0"/>
+        <stop offset="40%"  class="s-dawn-1"/>
+        <stop offset="100%" class="s-dawn-2"/>
+      </radialGradient>
+      <radialGradient id="g-sun" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   class="s-sun-0"/>
+        <stop offset="52%"  class="s-sun-1"/>
+        <stop offset="100%" class="s-sun-2"/>
+      </radialGradient>
+    </defs>
+
+    <g id="sun-wrap"><circle id="sun" cx="500" cy="880" r="230" fill="url(#g-sun)"/></g>
+
+    <!-- hills run far past the viewBox: the scene is fitted with `meet`, so
+         on a wide screen the square is centred and these cover the rest -->
+    <g id="hills">
+      <path class="hill hill--far"  d="M-4000 822 L0 822 C 150 762, 310 812, 470 806 C 650 798, 810 748, 1000 818 L5000 818 L5000 5000 L-4000 5000 Z"/>
+      <path class="hill hill--near" d="M-4000 874 L0 874 C 190 828, 370 872, 550 866 C 730 860, 890 822, 1000 872 L5000 872 L5000 5000 L-4000 5000 Z"/>
+    </g>
+
+    <ellipse id="cast-shadow" cx="500" cy="878" rx="160" ry="36"/>
+
+    <!-- the camera pulls back as the tree outgrows the frame -->
+    <g id="tree-cam">
+      <g id="tree-lean">
+        <g id="voxels"></g>
+      </g>
+    </g>
+  </svg>
+  <div class="grain"></div>
+  <div class="vignette"></div>
+</div>
+
+<!-- ───────────────────────── hud ───────────────────────── -->
+<header class="hud hud--top">
+  <div class="pose-id">
+    <p class="eyebrow">One pose &middot; hold it and it grows</p>
+    <h1 id="pose-name">Tree</h1>
+    <p id="pose-sanskrit">Vrksasana</p>
+  </div>
+
+  <div id="status-banner" role="status" aria-live="polite">
+    <span class="status-dot"></span>
+    <span class="status-copy">
+      <span class="status-text" id="status-text">Not zeroed</span>
+      <span class="status-sub" id="status-sub">Stand in Mountain, arm hanging, then calibrate</span>
+    </span>
+  </div>
+</header>
+
+<footer class="hud hud--bottom">
+
+  <section class="panel panel--rail">
+    <p class="eyebrow">Growth</p>
+    <ol id="sequence-rail">
+      <li data-stage="seed"><span class="rail-dot"></span><span class="rail-label">Seed</span><span class="rail-at mono">0s</span></li>
+      <li data-stage="sprout"><span class="rail-dot"></span><span class="rail-label">Sprout</span><span class="rail-at mono">3s</span></li>
+      <li data-stage="sapling"><span class="rail-dot"></span><span class="rail-label">Sapling</span><span class="rail-at mono">9s</span></li>
+      <li data-stage="tree"><span class="rail-dot"></span><span class="rail-label">Tree</span><span class="rail-at mono">22s</span></li>
+      <li data-stage="canopy"><span class="rail-dot"></span><span class="rail-label">Canopy</span><span class="rail-at mono">40s</span></li>
+      <li data-stage="bloom"><span class="rail-dot"></span><span class="rail-label">Bloom</span><span class="rail-at mono">65s</span></li>
+    </ol>
+    <p class="rail-foot">then it keeps going &mdash; a ring every 30s</p>
+  </section>
+
+  <div class="cluster">
+
+  <section class="panel panel--stats">
+    <dl class="stats">
+      <div><dt>Steadiness</dt><dd class="mono" id="score-value">&mdash;</dd></div>
+      <div><dt>Blocks</dt><dd class="mono" id="voxel-value">0</dd></div>
+      <div><dt>Held</dt><dd class="mono" id="held-value">0.0s</dd></div>
+      <div><dt>Best streak</dt><dd class="mono" id="streak-value">0.0s</dd></div>
+    </dl>
+    <div class="controls">
+      <button id="btn-calibrate" type="button">Calibrate <kbd>C</kbd></button>
+      <button id="btn-start" type="button" class="is-primary">Begin <kbd>S</kbd></button>
+      <button id="btn-skip" type="button" class="is-quiet">Skip <kbd>K</kbd></button>
+    </div>
+  </section>
+
+  <section class="instrument">
+    <svg id="hold-ring" viewBox="0 0 240 240" aria-hidden="true">
+      <circle class="ring ring--track"  cx="120" cy="120" r="106"/>
+      <circle class="ring ring--streak" cx="120" cy="120" r="94"/>
+      <circle class="ring ring--growth" cx="120" cy="120" r="106"/>
+      <g id="arm-dial"></g>
+    </svg>
+    <div class="instrument__readout">
+      <span class="readout-num mono" id="growth-pct">0<i>s</i></span>
+      <span class="readout-cap" id="stage-name">Seed</span>
+    </div>
+  </section>
+
+  </div>
+</footer>
+
+<!-- ───────────── overlays: one per §6 status ───────────── -->
+<div class="overlay" id="overlay">
+
+  <article class="card" data-for="uncalibrated">
+    <p class="eyebrow">Step one</p>
+    <h2>Find your mountain.</h2>
+    <p class="lede">Stand tall, left arm hanging, bud banded to the forearm. We take that as zero &mdash; every angle after this is measured from it.</p>
+    <button type="button" data-cmd="calibrate" class="is-primary is-large">Capture zero</button>
+    <p class="fineprint">Two seconds of stillness. Re-zero any time with <kbd>C</kbd>.</p>
+  </article>
+
+  <article class="card" data-for="calibrating">
+    <p class="eyebrow">Hold still</p>
+    <h2 class="countdown mono" id="calib-count">2.0</h2>
+    <p class="lede">Arm down. Breathe out.</p>
+  </article>
+
+  <article class="card" data-for="ready">
+    <p class="eyebrow">Zeroed</p>
+    <h2>Tree pose.</h2>
+    <p class="lede">Weight into the standing foot. Raise both arms overhead, palms together &mdash; those are the branches. Every second you hold it, the tree lays down another block.</p>
+    <button type="button" data-cmd="start" class="is-primary is-large">Begin</button>
+    <p class="fineprint">Drop out and it wilts rather than dies. Come back and it greens again.</p>
+  </article>
+
+  <article class="card" data-for="no_device">
+    <p class="eyebrow">No samples</p>
+    <h2>Check the bud.</h2>
+    <ul class="checklist">
+      <li>Right bud in the charging case</li>
+      <li>AirPods selected as the audio output device</li>
+      <li>Automatic Ear Detection off</li>
+      <li>Left bud banded, seam facing out</li>
+    </ul>
+    <p class="fineprint">The stream goes quiet without erroring. Nothing here is broken yet.</p>
+  </article>
+
+  <article class="card" data-for="complete">
+    <p class="eyebrow">It stands</p>
+    <h2>You grew this.</h2>
+    <dl class="score-grid">
+      <div><dt>Time held</dt><dd class="mono" id="final-held">&mdash;</dd></div>
+      <div><dt>Blocks</dt><dd class="mono" id="final-voxels">&mdash;</dd></div>
+      <div><dt>Steadiness</dt><dd class="mono" id="final-score">&mdash;</dd></div>
+    </dl>
+    <button type="button" data-cmd="reset" class="is-primary is-large">Plant another</button>
+  </article>
+
+</div>
+
+<div class="reconnect" id="reconnect"><span class="spinner"></span>Reconnecting</div>
+<div class="sourcebadge mono" id="sourcebadge">mock</div>
+
+<script src="voxel-tree.js"></script>
+<script src="pose-dial.js"></script>
+<script src="mock.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

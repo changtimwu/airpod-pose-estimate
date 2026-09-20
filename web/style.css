@@ -1,0 +1,540 @@
+/* ============================================================
+   Tree — AirPod Yoga alignment coach
+   Owner 04 · EXPERIENCE. Visual system only.
+
+   This file reads state, it never sets it:
+     body[data-status]   §6 of the wire contract, seven values
+     body[data-match]    "true" | "false"
+     body[data-quality]  good | noisy | stale
+     body[data-stage]    seed | sprout | sapling | tree | canopy | bloom
+     body[data-source]   live | mock
+     --growth      0..1   asymptotic, drives the sunrise
+     --wilt        0..1   0 = lit and green, 1 = drained
+     --hold-pct    0..1   outer ring, progress to the next growth stage
+     --streak-pct  0..1   inner ring, the contract's hold_ms / target_ms
+     --error-norm  0..1   0 = dead centre of the band
+     --arm-pitch / --arm-roll   degrees, live at 25 Hz
+
+   Nothing here touches JavaScript. Nothing in app.js touches style.
+   ============================================================ */
+
+/* ── dawn studio ─────────────────────────────────────────── */
+:root {
+  --paper:      #F4F1E8;
+  --paper-2:    #EBE5D7;
+  --paper-3:    #DED6C3;
+  --ink:        #1F2418;
+  --ink-2:      #545B49;
+  --ink-3:      #868D78;
+  --rule:       #D5CCB8;
+  --rule-2:     #BDB29A;
+
+  --dawn-0:     #FCEFD9;
+  --dawn-1:     #F5EDDE;
+  --dawn-2:     #E6E3D4;
+  --sun-core:   #FFF1CE;
+  --sun-mid:    #F0B65E;
+  --sun-edge:   #E0803A;
+
+  --leaf:       #62883C;   /* accent for rings, rails, focus */
+  --leaf-lit:   #8FB55C;
+  --bloom-ink:  #CC8091;
+  --go:         #2F7A4E;
+  --warn:       #B87407;
+  --stop:       #9E3434;
+
+  /* ── voxel palettes: top / left / right face of every cube ──
+     Three flat tones per material is the whole lighting model.
+     Key light from the upper +x, so left faces stay lighter than right. */
+  --bark-t:   #8A6440;  --bark-l:   #6B4A2F;  --bark-r:   #573A24;
+  --bark2-t:  #7C5836;  --bark2-l:  #5E4028;  --bark2-r:  #4B321E;
+  --leafA-t:  #5E8E3C;  --leafA-l:  #47702D;  --leafA-r:  #375823;
+  --leafB-t:  #7FAF49;  --leafB-l:  #628F36;  --leafB-r:  #4D732A;
+  --leafC-t:  #A3CC63;  --leafC-l:  #83AC48;  --leafC-r:  #688C37;
+  --bloom-t:  #F6C8D2;  --bloom-l:  #E49AAB;  --bloom-r:  #CC8091;
+  --grass-t:  #7FA850;  --grass-l:  #62883C;  --grass-r:  #4E6E2F;
+  --grass2-t: #92B85F;  --grass2-l: #738F45;  --grass2-r: #5C7437;
+  --dirt-t:   #9A8259;  --dirt-l:   #7C6743;  --dirt-r:   #645134;
+
+  --shadow-sm: 0 1px 2px rgba(31,36,24,.06), 0 6px 18px -12px rgba(31,36,24,.22);
+  --shadow-lg: 0 2px 6px rgba(31,36,24,.07), 0 28px 60px -34px rgba(31,36,24,.42);
+
+  --serif: Fraunces, "Iowan Old Style", Georgia, serif;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace;
+
+  --growth: 0; --wilt: 0; --hold-pct: 0; --streak-pct: 0; --error-norm: 1;
+  --arm-pitch: 0deg; --arm-roll: 0deg;
+
+  --ring-c-outer: 666.02;   /* 2πr, r = 106 */
+  --ring-c-inner: 590.62;   /* 2πr, r =  94 */
+}
+
+:root { color-scheme: light; }
+
+/* Predawn — opt-in only, via <html data-theme="dark">.
+   Deliberately NOT wired to prefers-color-scheme. This gets shown on a
+   projector in a room whose lighting nobody controls, and a judge whose
+   laptop happens to be in dark mode should not see a different demo than
+   the one we rehearsed. The dawn palette is the design; this is a spare. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+    --paper:    #16140F;
+    --paper-2:  #201D16;
+    --paper-3:  #2C2820;
+    --ink:      #F1ECDE;
+    --ink-2:    #B6AE99;
+    --ink-3:    #837C69;
+    --rule:     #362F24;
+    --rule-2:   #4B4334;
+
+    --dawn-0:   #4A3320;
+    --dawn-1:   #251E16;
+    --dawn-2:   #12100C;
+    --sun-core: #FFE7B4;
+    --sun-mid:  #E29A46;
+    --sun-edge: #C25F28;
+
+    --leaf:     #7FA84C;
+    --leaf-lit: #A3CC63;
+    --bloom-ink:#E9A7B6;
+    --go:       #6FBE8C;
+    --warn:     #E8A33D;
+    --stop:     #E08A8A;
+
+    --bark-t:   #6E4F33;  --bark-l:   #533928;  --bark-r:   #3F2B1C;
+    --bark2-t:  #614428;  --bark2-l:  #48311D;  --bark2-r:  #362416;
+    --leafA-t:  #4A7130;  --leafA-l:  #375825;  --leafA-r:  #29421B;
+    --leafB-t:  #668D3B;  --leafB-l:  #4E712C;  --leafB-r:  #3C5722;
+    --leafC-t:  #86A950;  --leafC-l:  #688839;  --leafC-r:  #516C2C;
+    --bloom-t:  #E0AEBA;  --bloom-l:  #C98A9A;  --bloom-r:  #AE6E7E;
+    --grass-t:  #64863F;  --grass-l:  #4C6B30;  --grass-r:  #3B5425;
+    --grass2-t: #728F49;  --grass2-l: #587036;  --grass2-r: #445829;
+    --dirt-t:   #6E5C40;  --dirt-l:   #57482F;  --dirt-r:   #423723;
+
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.5), 0 6px 18px -12px rgba(0,0,0,.8);
+    --shadow-lg: 0 2px 6px rgba(0,0,0,.5), 0 28px 60px -34px rgba(0,0,0,.9);
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: clamp(14px, 1.05vw, 17px);
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+}
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.eyebrow {
+  font-family: var(--mono);
+  font-size: .68rem; font-weight: 600;
+  letter-spacing: .13em; text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 .55rem;
+}
+
+kbd {
+  font-family: var(--mono); font-size: .72em;
+  padding: .1em .38em .16em;
+  border: 1px solid currentColor; border-radius: 4px;
+  opacity: .45; margin-left: .45em; vertical-align: .08em;
+}
+
+/* ════════════════════════════════════════════════════════════
+   SCENE
+   The sky is a CSS background so it is always full bleed; the SVG
+   fits with `meet` so the tree can grow to any size without ever
+   being cropped by the viewport's aspect ratio.
+   ════════════════════════════════════════════════════════════ */
+
+.stage {
+  position: fixed; inset: 0; z-index: 0; overflow: hidden;
+  background: radial-gradient(ellipse 90% 68% at 50% 92%,
+              var(--dawn-0) 0%, var(--dawn-1) 42%, var(--dawn-2) 100%);
+}
+#scene { width: 100%; height: 100%; display: block; }
+
+.s-sun-0 { stop-color: var(--sun-core); }
+.s-sun-1 { stop-color: var(--sun-mid);  stop-opacity: .5; }
+.s-sun-2 { stop-color: var(--sun-edge); stop-opacity: 0; }
+
+/* dawn breaks as the tree grows */
+#sun-wrap {
+  transform: translateY(calc((1 - var(--growth)) * 150px)) scale(calc(.72 + var(--growth) * .4));
+  transform-origin: 500px 900px;
+  opacity: calc(.22 + var(--growth) * .78);
+}
+
+.hill { fill: var(--paper-3); opacity: .42; }
+.hill--near { fill: var(--paper-2); opacity: .7; }
+#cast-shadow { fill: var(--ink); opacity: .07; filter: blur(14px); }
+
+/* ── voxels ───────────────────────────────────────────────── */
+
+.vox { animation: vox-pop 280ms cubic-bezier(.34,1.62,.6,1) both; }
+.vox path { stroke: none; shape-rendering: crispEdges; }
+.vox .f0 { fill: var(--v-t); }   /* top   */
+.vox .f1 { fill: var(--v-l); }   /* left  */
+.vox .f2 { fill: var(--v-r); }   /* right */
+
+.vox--bark   { --v-t: var(--bark-t);   --v-l: var(--bark-l);   --v-r: var(--bark-r);   }
+.vox--bark2  { --v-t: var(--bark2-t);  --v-l: var(--bark2-l);  --v-r: var(--bark2-r);  }
+.vox--leafA  { --v-t: var(--leafA-t);  --v-l: var(--leafA-l);  --v-r: var(--leafA-r);  }
+.vox--leafB  { --v-t: var(--leafB-t);  --v-l: var(--leafB-l);  --v-r: var(--leafB-r);  }
+.vox--leafC  { --v-t: var(--leafC-t);  --v-l: var(--leafC-l);  --v-r: var(--leafC-r);  }
+.vox--bloom  { --v-t: var(--bloom-t);  --v-l: var(--bloom-l);  --v-r: var(--bloom-r);  }
+.vox--grass  { --v-t: var(--grass-t);  --v-l: var(--grass-l);  --v-r: var(--grass-r);  }
+.vox--grass2 { --v-t: var(--grass2-t); --v-l: var(--grass2-l); --v-r: var(--grass2-r); }
+.vox--dirt   { --v-t: var(--dirt-t);   --v-l: var(--dirt-l);   --v-r: var(--dirt-r);   }
+
+/* every new block drops into place. Only ~5 a second are ever
+   animating, so this costs nothing and is most of the charm. */
+@keyframes vox-pop {
+  0%   { opacity: 0; transform: translateY(-16px) scale(.35); }
+  62%  { opacity: 1; }
+  100% { opacity: 1; transform: none; }
+}
+
+/* roll leans the tree; the sway underneath it is idle life */
+#tree-lean {
+  transform: skewX(calc(var(--arm-roll) * -.05));
+  transform-origin: 0px 30px;
+  transition: transform 280ms cubic-bezier(.22,.61,.36,1);
+}
+#voxels {
+  transform-origin: 0px 30px;
+  animation: sway 11s ease-in-out infinite;
+}
+@keyframes sway {
+  0%, 100% { transform: skewX(-.5deg); }
+  50%      { transform: skewX(.5deg);  }
+}
+
+/* wilt. Updated in coarse steps by app.js and smoothed here, so the
+   group filter re-renders a few times a second rather than 25. */
+#tree-cam {
+  filter: saturate(calc(1 - var(--wilt) * .82)) brightness(calc(1 - var(--wilt) * .09));
+  transition: filter 420ms ease;
+}
+body[data-match="true"] #tree-cam { filter: saturate(1.04) brightness(1.03); }
+
+.grain {
+  position: absolute; inset: 0; pointer-events: none;
+  opacity: .42; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/><feColorMatrix type='saturate' values='0'/></filter><rect width='160' height='160' filter='url(%23n)' opacity='.3'/></svg>");
+}
+:root[data-theme="dark"] .grain { mix-blend-mode: screen; opacity: .16; }
+/* the scrim has to lift a dark scene, not bury it further */
+:root[data-theme="dark"] .overlay { background: color-mix(in srgb, #000 42%, transparent); }
+
+.vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse 84% 78% at 50% 48%, transparent 52%,
+              color-mix(in srgb, var(--paper) 46%, transparent) 100%);
+}
+
+/* ════════════════════════════════════════════════════════════
+   HUD
+   ════════════════════════════════════════════════════════════ */
+
+.hud {
+  position: relative; z-index: 2;
+  display: flex; align-items: flex-start; justify-content: space-between;
+  gap: 2rem;
+  padding: clamp(1rem, 2.4vw, 2.2rem) clamp(1rem, 3vw, 2.8rem);
+  pointer-events: none;
+}
+.hud > * { pointer-events: auto; }
+.hud--bottom { align-items: flex-end; }
+
+.pose-id h1 {
+  font-family: var(--serif); font-weight: 300;
+  font-size: clamp(2.6rem, 7.5vw, 6rem);
+  line-height: .9; letter-spacing: -.035em; margin: 0;
+  font-variation-settings: "opsz" 144;
+}
+#pose-sanskrit {
+  font-family: var(--serif); font-style: italic; font-weight: 400;
+  font-size: clamp(1rem, 2vw, 1.45rem);
+  color: var(--ink-2); margin: .2rem 0 0;
+}
+
+#status-banner {
+  display: flex; align-items: center; gap: .8rem;
+  background: color-mix(in srgb, var(--paper) 82%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border: 1px solid var(--rule); border-radius: 999px;
+  padding: .6rem 1.3rem .6rem .95rem;
+  box-shadow: var(--shadow-sm);
+  max-width: 25rem;
+  transition: border-color 400ms ease;
+}
+.status-copy { display: flex; flex-direction: column; line-height: 1.32; }
+.status-text { font-weight: 600; font-size: .95rem; }
+.status-sub  { font-size: .78rem; color: var(--ink-3); }
+
+.status-dot { width: .62rem; height: .62rem; border-radius: 50%; background: var(--ink-3); flex: none; }
+body[data-status="active"]      .status-dot { background: var(--go);   color: var(--go);   animation: pulse 2.4s ease-out infinite; }
+body[data-status="calibrating"] .status-dot { background: var(--warn); color: var(--warn); animation: pulse 1s ease-out infinite; }
+body[data-status="ready"]       .status-dot { background: var(--go); }
+body[data-status="complete"]    .status-dot { background: var(--bloom-ink); }
+body[data-status="no_device"]   .status-dot,
+body[data-status="disconnected"] .status-dot { background: var(--stop); }
+body[data-status="no_device"]    #status-banner,
+body[data-status="disconnected"] #status-banner { border-color: color-mix(in srgb, var(--stop) 45%, var(--rule)); }
+
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0 currentColor; }
+  70%  { box-shadow: 0 0 0 .7rem transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.panel {
+  background: color-mix(in srgb, var(--paper) 78%, transparent);
+  backdrop-filter: blur(14px) saturate(1.3);
+  -webkit-backdrop-filter: blur(14px) saturate(1.3);
+  border: 1px solid var(--rule); border-radius: 18px;
+  padding: 1rem 1.25rem 1.05rem;
+  box-shadow: var(--shadow-sm);
+  min-width: 13rem;
+}
+
+/* the contract's #sequence-rail: one pose, so it tracks growth stages */
+#sequence-rail { list-style: none; margin: 0; padding: 0; display: grid; gap: .42rem; }
+#sequence-rail li {
+  display: grid; grid-template-columns: .7rem 1fr auto;
+  align-items: center; gap: .7rem;
+  font-size: .86rem; color: var(--ink-3);
+  transition: color 400ms ease;
+}
+.rail-dot {
+  width: .55rem; height: .55rem; border-radius: 50%;
+  border: 1.5px solid var(--rule-2);
+  transition: background 500ms ease, border-color 500ms ease, transform 500ms cubic-bezier(.34,1.56,.64,1);
+}
+.rail-at { font-size: .72rem; opacity: .5; }
+.rail-foot { font-size: .7rem; color: var(--ink-3); margin: .7rem 0 0; font-style: italic; opacity: .8; }
+
+#sequence-rail li[data-reached="true"] { color: var(--ink); }
+#sequence-rail li[data-reached="true"] .rail-dot { background: var(--leaf); border-color: var(--leaf); }
+#sequence-rail li[data-current="true"] { font-weight: 600; }
+#sequence-rail li[data-current="true"] .rail-dot { transform: scale(1.5); background: var(--leaf-lit); border-color: var(--leaf-lit); }
+#sequence-rail li[data-stage="bloom"][data-reached="true"] .rail-dot { background: var(--bloom-ink); border-color: var(--bloom-ink); }
+
+.stats { margin: 0 0 .9rem; display: grid; gap: .32rem; }
+.stats > div { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.stats dt { font-size: .78rem; color: var(--ink-3); }
+.stats dd { margin: 0; font-size: 1rem; font-weight: 500; }
+
+.controls { display: flex; flex-wrap: wrap; gap: .45rem; }
+button {
+  font-family: var(--sans); font-size: .86rem; font-weight: 600;
+  color: var(--ink); background: var(--paper);
+  border: 1px solid var(--rule-2); border-radius: 10px;
+  padding: .5rem .85rem; cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease, transform 120ms ease, color 160ms ease;
+}
+button:hover { background: var(--paper-2); border-color: var(--ink-3); }
+button:active { transform: translateY(1px); }
+button:focus-visible { outline: 2px solid var(--leaf); outline-offset: 2px; }
+button.is-primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+button.is-primary:hover { background: var(--leaf); border-color: var(--leaf); color: #fff; }
+button.is-quiet { background: transparent; color: var(--ink-3); border-color: var(--rule); }
+button.is-quiet:hover { color: var(--ink); }
+button.is-large { font-size: 1rem; padding: .78rem 1.6rem; border-radius: 12px; margin-top: .4rem; }
+
+/* ── instrument: hold ring + arm dial ─────────────────────── */
+/* Kept out of the centre on purpose. The tree is the hero; an instrument
+   sitting on its trunk is the single fastest way to make this look like a
+   dashboard instead of a thing you grew. */
+.cluster { display: flex; align-items: flex-end; gap: clamp(.8rem, 1.6vw, 1.4rem); }
+
+.instrument {
+  position: relative; flex: none;
+  width: clamp(176px, 18vw, 224px); aspect-ratio: 1;
+  margin-bottom: -.4rem;
+}
+#hold-ring { width: 100%; height: 100%; overflow: visible; transform: rotate(-90deg); }
+
+.ring { fill: none; stroke-linecap: round; }
+.ring--track  { stroke: var(--rule); stroke-width: 3; }
+.ring--growth {
+  stroke: var(--leaf); stroke-width: 7;
+  stroke-dasharray: var(--ring-c-outer);
+  stroke-dashoffset: calc(var(--ring-c-outer) * (1 - var(--hold-pct)));
+  transition: stroke 500ms ease;
+}
+.ring--streak {
+  stroke: var(--leaf-lit); stroke-width: 2.5; opacity: .65;
+  stroke-dasharray: var(--ring-c-inner);
+  stroke-dashoffset: calc(var(--ring-c-inner) * (1 - var(--streak-pct)));
+}
+body[data-match="false"] .ring--growth { stroke: var(--ink-3); }
+body[data-stage="bloom"] .ring--growth { stroke: var(--bloom-ink); }
+
+#arm-dial { transform: rotate(90deg); transform-origin: 120px 120px; }
+#arm-dial .dial-tick { stroke: var(--rule-2); stroke-width: 1.5; stroke-linecap: round; }
+#arm-dial .dial-tick--major { stroke: var(--ink-3); stroke-width: 2; }
+#arm-dial .dial-band {
+  fill: none; stroke-width: 9; stroke-linecap: round;
+  stroke: color-mix(in srgb, var(--leaf) 28%, transparent);
+  transition: stroke 400ms ease, stroke-width 400ms ease;
+}
+body[data-match="true"] #arm-dial .dial-band {
+  stroke: color-mix(in srgb, var(--leaf-lit) 60%, transparent); stroke-width: 11;
+}
+#arm-dial .dial-arm  { stroke: var(--ink); stroke-width: 5; stroke-linecap: round; transition: stroke 300ms ease; }
+#arm-dial .dial-palm { stroke: var(--ink); stroke-width: 3.5; stroke-linecap: round; }
+#arm-dial .dial-hub  { fill: var(--ink); }
+body[data-match="true"] #arm-dial .dial-arm,
+body[data-match="true"] #arm-dial .dial-palm { stroke: var(--leaf); }
+body[data-quality="stale"] #arm-dial { opacity: .3; }
+body[data-quality="noisy"] #arm-dial .dial-arm { stroke-dasharray: 3 4; }
+
+.instrument__readout {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: .1rem;
+  pointer-events: none;
+}
+.readout-num {
+  font-family: var(--serif); font-weight: 300;
+  font-size: clamp(2.1rem, 4.2vw, 3.2rem);
+  line-height: 1; letter-spacing: -.04em;
+}
+.readout-num i { font-style: normal; font-size: .42em; opacity: .45; margin-left: .06em; }
+.readout-cap {
+  font-family: var(--mono); font-size: .66rem;
+  letter-spacing: .13em; text-transform: uppercase; color: var(--ink-3);
+  text-align: center;
+}
+
+/* ════════════════════════════════════════════════════════════
+   OVERLAYS — one card per status (§6 screen inventory)
+   ════════════════════════════════════════════════════════════ */
+
+.overlay {
+  position: fixed; inset: 0; z-index: 5;
+  display: grid; place-items: center; padding: 1.25rem;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--paper) 40%, transparent);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  opacity: 0; transition: opacity 500ms ease;
+}
+.card {
+  display: none; max-width: 34rem; text-align: center;
+  background: color-mix(in srgb, var(--paper) 93%, transparent);
+  border: 1px solid var(--rule); border-radius: 24px;
+  padding: clamp(1.8rem, 4vw, 3rem);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+}
+.card h2 {
+  font-family: var(--serif); font-weight: 300;
+  font-size: clamp(1.9rem, 4.6vw, 3.1rem);
+  line-height: 1.02; letter-spacing: -.03em;
+  margin: 0 0 .7rem; text-wrap: balance;
+}
+.card .lede {
+  font-size: clamp(.98rem, 1.5vw, 1.12rem); color: var(--ink-2);
+  margin: 0 auto 1.3rem; max-width: 30rem; text-wrap: pretty;
+}
+.card .fineprint { font-size: .78rem; color: var(--ink-3); margin: 1rem 0 0; }
+.countdown { font-size: clamp(3.4rem, 11vw, 7rem); font-weight: 400; letter-spacing: -.04em; }
+
+.checklist { list-style: none; margin: 0 auto .6rem; padding: 0; display: grid; gap: .5rem; text-align: left; max-width: 22rem; }
+.checklist li { display: flex; gap: .6rem; font-size: .95rem; color: var(--ink-2); }
+.checklist li::before { content: "\25A1"; color: var(--stop); font-weight: 700; }
+
+.score-grid { display: flex; justify-content: center; gap: clamp(1.4rem, 4vw, 3rem); margin: 0 0 1.4rem; }
+.score-grid dt { font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: .2rem; }
+.score-grid dd { margin: 0; font-family: var(--serif); font-weight: 300; font-size: clamp(1.7rem, 3.6vw, 2.5rem); letter-spacing: -.03em; }
+
+body[data-status="uncalibrated"] .overlay,
+body[data-status="calibrating"]  .overlay,
+body[data-status="ready"]        .overlay,
+body[data-status="no_device"]    .overlay,
+body[data-status="complete"]     .overlay { opacity: 1; }
+
+body[data-status="uncalibrated"] .card[data-for="uncalibrated"],
+body[data-status="calibrating"]  .card[data-for="calibrating"],
+body[data-status="ready"]        .card[data-for="ready"],
+body[data-status="no_device"]    .card[data-for="no_device"],
+body[data-status="complete"]     .card[data-for="complete"] {
+  display: block;
+  animation: card-in 520ms cubic-bezier(.22,.61,.36,1) both;
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(14px) scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* never cover the tree it is congratulating */
+body[data-status="complete"] .overlay { align-items: end; padding-bottom: clamp(1.5rem, 5vh, 4rem); }
+
+/* ── connection loss: dim, never blank (§10) ──────────────── */
+.reconnect {
+  position: fixed; z-index: 8; left: 50%; top: 1.1rem;
+  transform: translateX(-50%) translateY(-180%);
+  display: flex; align-items: center; gap: .55rem;
+  font-family: var(--mono); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase;
+  background: var(--ink); color: var(--paper);
+  padding: .5rem 1rem; border-radius: 999px; box-shadow: var(--shadow-lg);
+  transition: transform 420ms cubic-bezier(.22,.61,.36,1);
+}
+body[data-status="disconnected"] .reconnect { transform: translateX(-50%) translateY(0); }
+.spinner { width: .6rem; height: .6rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+body[data-status="disconnected"] .stage,
+body[data-status="disconnected"] .hud { filter: grayscale(.7) opacity(.5); transition: filter 500ms ease; }
+
+.sourcebadge {
+  position: fixed; z-index: 8; right: 1rem; bottom: .5rem;
+  font-size: .64rem; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-3); opacity: .5; pointer-events: none;
+}
+body[data-source="live"] .sourcebadge { display: none; }
+
+body[data-status="active"] #btn-start,
+body[data-status="complete"] #btn-start { display: none; }
+body:not([data-status="active"]) #btn-skip { display: none; }
+
+/* ════════════════════════════════════════════════════════════
+   RESPONSIVE — a projector is the target, but a laptop during
+   the build must not look broken.
+   ════════════════════════════════════════════════════════════ */
+
+@media (max-width: 980px) {
+  .hud { gap: 1rem; }
+  .hud--bottom { flex-wrap: wrap; justify-content: center; }
+  .panel { min-width: 0; flex: 1 1 11rem; }
+  .cluster { flex: 1 1 auto; justify-content: flex-end; }
+  .instrument { width: min(38vw, 176px); }
+  #status-banner .status-sub { display: none; }
+}
+@media (max-width: 600px) {
+  .panel--rail { display: none; }
+  .pose-id h1 { font-size: 3rem; }
+}
+@media (max-height: 580px) {
+  .panel--rail, .stats { display: none; }
+  .hud { padding-block: .6rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #voxels { animation: none; }
+  .vox { animation-duration: 1ms; }
+  .status-dot { animation: none !important; }
+  *, *::before, *::after { transition-duration: 1ms !important; }
+}
