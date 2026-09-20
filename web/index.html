@@ -1,274 +1,186 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Asana Coach</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tree — AirPod Yoga</title>
 <!--
-  SCAFFOLD. docs/yoga/00-build-plan.md assigns web/ to Interface + Experience,
-  and this is deliberately one self-contained file with no app.js or style.css
-  so it collides with nothing they own. Replace it freely.
+  Owner 04 · EXPERIENCE. Replaces the Bridge scaffold, keeping its transport:
+  SSE on /stream, commands as POST /command.
 
-  It exists because server.py serves web/index.html and web/ did not exist, so
-  `GET /` was a 404 and the bridge had no visible output at all.
+  DOM contract, §8 of docs/yoga/01-wire-contract.md — frozen:
+    #arm-dial  #hold-ring  #pose-name  #pose-sanskrit  #status-banner
+    #score-value  #sequence-rail  #btn-calibrate  #btn-start  #btn-skip
 
-  Contract: GET /stream (SSE frames, docs/yoga/01-wire-contract.md) and
-  POST /command {"cmd": "calibrate"|"start"|"skip"|"reset"}. No dependencies --
-  hackathon wifi is not a build step.
+  #sequence-rail is repurposed, not renamed: one pose, so the rail tracks
+  growth stages instead of a pose sequence. Same id, same owner, no rename.
 -->
-<style>
-  :root {
-    --bg: #0e1116;
-    --panel: #171b22;
-    --line: #262c36;
-    --text: #e8edf4;
-    --dim: #8b95a5;
-    --good: #35d07f;
-    --warn: #ffb547;
-    --bad: #ff5f56;
-    --accent: #5b9dff;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; background: var(--bg); color: var(--text);
-    font: 16px/1.5 ui-sans-serif, -apple-system, "SF Pro Text", system-ui, sans-serif;
-    min-height: 100vh; padding: 24px;
-  }
-  header { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
-  h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: -0.01em; }
-  #status {
-    font-size: 13px; padding: 4px 12px; border-radius: 999px;
-    background: var(--panel); border: 1px solid var(--line); color: var(--dim);
-    text-transform: uppercase; letter-spacing: 0.08em;
-  }
-  #status[data-status="active"] { color: var(--good); border-color: var(--good); }
-  #status[data-status="calibrating"] { color: var(--warn); border-color: var(--warn); }
-  #status[data-status="no_device"] { color: var(--bad); border-color: var(--bad); }
-  .spacer { flex: 1; }
-  button {
-    font: inherit; font-size: 14px; padding: 8px 16px; border-radius: 8px;
-    background: var(--panel); color: var(--text);
-    border: 1px solid var(--line); cursor: pointer;
-  }
-  button:hover { border-color: var(--accent); }
-  main { display: block; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
-  .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); }
-  #poseEn { font-size: clamp(26px, 3.2vw, 40px); font-weight: 680; letter-spacing: -0.02em; margin: 6px 0 0; }
-  #poseSa { font-size: 18px; color: var(--dim); font-style: italic; margin: 0 0 20px; }
-  .bar { height: 14px; border-radius: 999px; background: #0b0e13; overflow: hidden; border: 1px solid var(--line); }
-  .bar > div { height: 100%; width: 0%; background: var(--accent); transition: width 90ms linear; }
-  #holdBar > div { background: var(--warn); }
-  body[data-match="true"] #holdBar > div { background: var(--good); }
-  .readouts { display: flex; gap: 28px; margin-top: 20px; flex-wrap: wrap; }
-  .readout b { display: block; font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
-  #seq { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px; }
-  .chip {
-    font-size: 13px; padding: 5px 12px; border-radius: 999px;
-    border: 1px solid var(--line); color: var(--dim);
-  }
-  .chip[data-state="current"] { color: var(--text); border-color: var(--accent); }
-  .chip[data-state="done"] { color: var(--good); border-color: var(--good); }
-  svg { width: 100%; height: auto; display: block; }
-  #hint { margin-top: 14px; color: var(--dim); font-size: 14px; min-height: 1.5em; }
-  .posePanel { display: flex; gap: 20px; align-items: flex-start; }
-  .poseMain { flex: 1; min-width: 0; }
-  .axes { width: clamp(180px, 24vw, 260px); flex: none; text-align: center; }
-  .axes svg { width: 100%; }
-  .axesKey { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); }
-  .axesKey span { display: flex; align-items: center; gap: 7px; }
-  .axesKey i { width: 11px; height: 3px; border-radius: 2px; }
-  .axesNote { font-size: 11px; color: var(--dim); text-align: left; margin: 12px 0 0; line-height: 1.45; }
-  .angles { display: flex; gap: 16px; margin-top: 14px; text-align: left; }
-  .angles b { display: block; font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
-  /* Stack only when it genuinely cannot fit. Above this the axis view stays in
-     the top-right corner where it is the first thing an audience looks at; below
-     it, order:-1 keeps it at the TOP of the panel rather than buried under the
-     sequence list and off the bottom of a short window. */
-  @media (max-width: 700px) {
-    .posePanel { flex-direction: column; }
-    .axes { order: -1; width: 100%; max-width: 240px; }
-    .axesNote { display: none; }
-  }
-</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="style.css">
 </head>
-<body data-match="false">
-<header>
-  <h1>Asana Coach</h1>
-  <span id="status" data-status="offline">connecting</span>
-  <span class="spacer"></span>
-  <button data-cmd="calibrate">Calibrate</button>
-  <button data-cmd="start">Start</button>
-  <button data-cmd="skip">Skip</button>
-  <button data-cmd="reset">Reset</button>
+
+<body data-status="uncalibrated" data-pose="tree" data-match="false" data-quality="good" data-stage="seed" data-source="mock">
+
+<!-- ───────────────────────── scene ───────────────────────── -->
+<div class="stage" aria-hidden="true">
+  <svg id="scene" viewBox="0 0 1000 1000" preserveAspectRatio="xMidYMid meet">
+    <defs>
+      <radialGradient id="g-dawn" cx="50%" cy="86%" r="74%">
+        <stop offset="0%"   class="s-dawn-0"/>
+        <stop offset="40%"  class="s-dawn-1"/>
+        <stop offset="100%" class="s-dawn-2"/>
+      </radialGradient>
+      <radialGradient id="g-sun" cx="50%" cy="50%" r="50%">
+        <stop offset="0%"   class="s-sun-0"/>
+        <stop offset="52%"  class="s-sun-1"/>
+        <stop offset="100%" class="s-sun-2"/>
+      </radialGradient>
+    </defs>
+
+    <g id="sun-wrap"><circle id="sun" cx="500" cy="880" r="230" fill="url(#g-sun)"/></g>
+
+    <!-- hills run far past the viewBox: the scene is fitted with `meet`, so
+         on a wide screen the square is centred and these cover the rest -->
+    <g id="hills">
+      <path class="hill hill--far"  d="M-4000 822 L0 822 C 150 762, 310 812, 470 806 C 650 798, 810 748, 1000 818 L5000 818 L5000 5000 L-4000 5000 Z"/>
+      <path class="hill hill--near" d="M-4000 874 L0 874 C 190 828, 370 872, 550 866 C 730 860, 890 822, 1000 872 L5000 872 L5000 5000 L-4000 5000 Z"/>
+    </g>
+
+    <ellipse id="cast-shadow" cx="500" cy="878" rx="160" ry="36"/>
+
+    <!-- the camera pulls back as the tree outgrows the frame -->
+    <g id="tree-cam">
+      <g id="tree-lean">
+        <g id="voxels"></g>
+      </g>
+    </g>
+  </svg>
+  <div class="grain"></div>
+  <div class="vignette"></div>
+</div>
+
+<!-- ───────────────────────── hud ───────────────────────── -->
+<header class="hud hud--top">
+  <div class="pose-id">
+    <p class="eyebrow">One pose &middot; hold it and it grows</p>
+    <h1 id="pose-name">Tree</h1>
+    <p id="pose-sanskrit">Vrksasana</p>
+  </div>
+
+  <div id="status-banner" role="status" aria-live="polite">
+    <span class="status-dot"></span>
+    <span class="status-copy">
+      <span class="status-text" id="status-text">Not zeroed</span>
+      <span class="status-sub" id="status-sub">Stand in Mountain, arm hanging, then calibrate</span>
+    </span>
+  </div>
 </header>
 
-<main>
-  <section class="panel posePanel">
-   <div class="poseMain">
-    <div class="label">Target pose</div>
-    <h2 id="poseEn">–</h2>
-    <p id="poseSa"></p>
+<footer class="hud hud--bottom">
 
-    <div class="label">Hold</div>
-    <div class="bar" id="holdBar"><div></div></div>
-    <div class="readouts">
-      <div class="readout"><span class="label">Held</span><b id="held">0.0s</b></div>
-      <div class="readout"><span class="label">Error</span><b id="error">–</b></div>
-      <div class="readout"><span class="label">Score</span><b id="score">0%</b></div>
-    </div>
-
-    <div class="label" style="margin-top:20px">Sequence</div>
-    <div id="seq"></div>
-    <div id="hint"></div>
-   </div>
-
-   <aside class="axes">
-     <div class="label">Sensor axes</div>
-     <svg viewBox="0 0 160 160" aria-label="live device axes">
-       <!-- faint ground diamond, so the rotation reads as 3D -->
-       <polygon points="80,50 132,80 80,110 28,80" fill="none" stroke="#1d232c" stroke-width="1"/>
-       <g id="axes3d"></g>
-     </svg>
-     <div class="axesKey">
-       <span><i style="background:#ff5f56"></i>forward</span>
-       <span><i style="background:#35d07f"></i>left</span>
-       <span><i style="background:#5b9dff"></i>up</span>
-     </div>
-     <div class="angles">
-       <div><span class="label">Pitch</span><b id="pitch">–</b></div>
-       <div><span class="label">Roll</span><b id="roll">–</b></div>
-       <div><span class="label">Yaw</span><b id="yaw">–</b></div>
-     </div>
-     <p class="axesNote">The IMU reports one orientation. Everything else on this
-     page is derived from these three axes.</p>
-   </aside>
+  <section class="panel panel--rail">
+    <p class="eyebrow">Growth</p>
+    <ol id="sequence-rail">
+      <li data-stage="seed"><span class="rail-dot"></span><span class="rail-label">Seed</span><span class="rail-at mono">0s</span></li>
+      <li data-stage="sprout"><span class="rail-dot"></span><span class="rail-label">Sprout</span><span class="rail-at mono">3s</span></li>
+      <li data-stage="sapling"><span class="rail-dot"></span><span class="rail-label">Sapling</span><span class="rail-at mono">9s</span></li>
+      <li data-stage="tree"><span class="rail-dot"></span><span class="rail-label">Tree</span><span class="rail-at mono">22s</span></li>
+      <li data-stage="canopy"><span class="rail-dot"></span><span class="rail-label">Canopy</span><span class="rail-at mono">40s</span></li>
+      <li data-stage="bloom"><span class="rail-dot"></span><span class="rail-label">Bloom</span><span class="rail-at mono">65s</span></li>
+    </ol>
+    <p class="rail-foot">then it keeps going &mdash; a ring every 30s</p>
   </section>
-</main>
 
-<script>
-  const $ = (id) => document.getElementById(id);
-  const deg = (v) => (v === null || v === undefined) ? "–" : v.toFixed(0) + "°";
+  <div class="cluster">
 
-  document.querySelectorAll("button[data-cmd]").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      fetch("/command", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cmd: btn.dataset.cmd }),
-      }).catch(() => {});
-    });
-  });
+  <section class="panel panel--stats">
+    <dl class="stats">
+      <div><dt>Steadiness</dt><dd class="mono" id="score-value">&mdash;</dd></div>
+      <div><dt>Blocks</dt><dd class="mono" id="voxel-value">0</dd></div>
+      <div><dt>Held</dt><dd class="mono" id="held-value">0.0s</dd></div>
+      <div><dt>Best streak</dt><dd class="mono" id="streak-value">0.0s</dd></div>
+    </dl>
+    <div class="controls">
+      <button id="btn-calibrate" type="button">Calibrate <kbd>C</kbd></button>
+      <button id="btn-start" type="button" class="is-primary">Begin <kbd>S</kbd></button>
+      <button id="btn-skip" type="button" class="is-quiet">Skip <kbd>K</kbd></button>
+    </div>
+  </section>
 
-  const HINTS = {
-    uncalibrated: "Stand in a neutral position and press Calibrate.",
-    calibrating: "Hold still …",
-    ready: "Press Start when you are ready.",
-    active: "",
-    complete: "Sequence complete.",
-    no_device: "No samples arriving — are the AirPods the selected audio output?",
-  };
+  <section class="instrument">
+    <svg id="hold-ring" viewBox="0 0 240 240" aria-hidden="true">
+      <circle class="ring ring--track"  cx="120" cy="120" r="106"/>
+      <circle class="ring ring--streak" cx="120" cy="120" r="94"/>
+      <circle class="ring ring--growth" cx="120" cy="120" r="106"/>
+      <g id="arm-dial"></g>
+    </svg>
+    <div class="instrument__readout">
+      <span class="readout-num mono" id="growth-pct">0<i>s</i></span>
+      <span class="readout-cap" id="stage-name">Seed</span>
+    </div>
+  </section>
 
-  // Rebuild the rotation from the Euler angles the frame carries, using the
-  // convention pinned in quaternion.py: intrinsic Z-Y-X, with pitch negated so
-  // that positive means nose-up. If the frame ever carries `q` directly, drop
-  // this and use it -- the quaternion is the real source of truth.
-  function rotationFrom(yaw, pitch, roll) {
-    const r = (d) => (d * Math.PI) / 180;
-    const cz = Math.cos(r(yaw)), sz = Math.sin(r(yaw));
-    const cy = Math.cos(r(-pitch)), sy = Math.sin(r(-pitch));
-    const cx = Math.cos(r(roll)), sx = Math.sin(r(roll));
-    return [
-      [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
-      [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
-      [-sy,     cy * sx,                cy * cx],
-    ];
-  }
+  </div>
+</footer>
 
-  const AXES = [
-    { v: [1, 0, 0], color: "#ff5f56", label: "F" },  // nose
-    { v: [0, 1, 0], color: "#35d07f", label: "L" },  // left ear
-    { v: [0, 0, 1], color: "#5b9dff", label: "U" },  // crown
-  ];
-  const ISO = 46, CX = 80, CY = 80;
+<!-- ───────────── overlays: one per §6 status ───────────── -->
+<div class="overlay" id="overlay">
 
-  function project(v) {
-    // Isometric: x/y recede, z is screen-up.
-    return [
-      CX + (v[0] - v[1]) * 0.866 * ISO,
-      CY + ((v[0] + v[1]) * 0.5 - v[2]) * ISO,
-    ];
-  }
+  <article class="card" data-for="uncalibrated">
+    <p class="eyebrow">Step one</p>
+    <h2>Find your mountain.</h2>
+    <p class="lede">Stand tall, left arm hanging, bud banded to the forearm. We take that as zero &mdash; every angle after this is measured from it.</p>
+    <button type="button" data-cmd="calibrate" class="is-primary is-large">Capture zero</button>
+    <p class="fineprint">Two seconds of stillness. Re-zero any time with <kbd>C</kbd>.</p>
+  </article>
 
-  function drawAxes(yaw, pitch, roll) {
-    const R = rotationFrom(yaw, pitch, roll);
-    const drawn = AXES.map((axis) => {
-      const v = [0, 1, 2].map((i) =>
-        R[i][0] * axis.v[0] + R[i][1] * axis.v[1] + R[i][2] * axis.v[2]);
-      return { ...axis, v, depth: v[0] + v[1] + v[2] };
-    });
-    // Painter's algorithm: far axes first, so the near one overlaps it.
-    drawn.sort((a, b) => a.depth - b.depth);
+  <article class="card" data-for="calibrating">
+    <p class="eyebrow">Hold still</p>
+    <h2 class="countdown mono" id="calib-count">2.0</h2>
+    <p class="lede">Arm down. Breathe out.</p>
+  </article>
 
-    $("axes3d").innerHTML = drawn.map((a) => {
-      const [x, y] = project(a.v);
-      const [lx, ly] = project(a.v.map((c) => c * 1.26));
-      return `<line x1="${CX}" y1="${CY}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"
-                   stroke="${a.color}" stroke-width="5" stroke-linecap="round"/>
-              <text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" fill="${a.color}"
-                   font-size="13" font-weight="700" text-anchor="middle"
-                   dominant-baseline="central">${a.label}</text>`;
-    }).join("") + `<circle cx="${CX}" cy="${CY}" r="4.5" fill="#e8edf4"/>`;
-  }
+  <article class="card" data-for="ready">
+    <p class="eyebrow">Zeroed</p>
+    <h2>Tree pose.</h2>
+    <p class="lede">Weight into the standing foot. Raise both arms overhead, palms together &mdash; those are the branches. Every second you hold it, the tree lays down another block.</p>
+    <button type="button" data-cmd="start" class="is-primary is-large">Begin</button>
+    <p class="fineprint">Drop out and it wilts rather than dies. Come back and it greens again.</p>
+  </article>
 
-  function render(f) {
-    $("status").textContent = f.status.replace("_", " ");
-    $("status").dataset.status = f.status;
-    $("hint").textContent = HINTS[f.status] || "";
+  <article class="card" data-for="no_device">
+    <p class="eyebrow">No samples</p>
+    <h2>Check the bud.</h2>
+    <ul class="checklist">
+      <li>Right bud in the charging case</li>
+      <li>AirPods selected as the audio output device</li>
+      <li>Automatic Ear Detection off</li>
+      <li>Left bud banded, seam facing out</li>
+    </ul>
+    <p class="fineprint">The stream goes quiet without erroring. Nothing here is broken yet.</p>
+  </article>
 
-    const arm = f.arm || {};
-    $("pitch").textContent = deg(arm.pitch);
-    $("roll").textContent = deg(arm.roll);
-    $("yaw").textContent = deg(arm.yaw);
-    drawAxes(arm.yaw || 0, arm.pitch || 0, arm.roll || 0);
+  <article class="card" data-for="complete">
+    <p class="eyebrow">It stands</p>
+    <h2>You grew this.</h2>
+    <dl class="score-grid">
+      <div><dt>Time held</dt><dd class="mono" id="final-held">&mdash;</dd></div>
+      <div><dt>Blocks</dt><dd class="mono" id="final-voxels">&mdash;</dd></div>
+      <div><dt>Steadiness</dt><dd class="mono" id="final-score">&mdash;</dd></div>
+    </dl>
+    <button type="button" data-cmd="reset" class="is-primary is-large">Plant another</button>
+  </article>
 
-    const pose = f.pose || {};
-    const labels = (f.session && f.session.labels) || {};
-    const target = labels[pose.target] || {};
-    $("poseEn").textContent = target.en || pose.target || "–";
-    $("poseSa").textContent = target.sa || "";
-    document.body.dataset.match = String(!!pose.match);
+</div>
 
-    const held = (pose.hold_ms || 0) / 1000, need = (pose.target_ms || 1) / 1000;
-    $("holdBar").firstElementChild.style.width =
-      Math.min(100, (held / need) * 100).toFixed(1) + "%";
-    $("held").textContent = held.toFixed(1) + "s";
-    $("error").textContent = pose.match ? deg(pose.error_deg) : "–";
+<div class="reconnect" id="reconnect"><span class="spinner"></span>Reconnecting</div>
+<div class="sourcebadge mono" id="sourcebadge">mock</div>
 
-    const session = f.session || {};
-    $("score").textContent = Math.round((session.score || 0) * 100) + "%";
-
-    const seq = session.sequence || [];
-    if ($("seq").children.length !== seq.length) {
-      $("seq").innerHTML = "";
-      seq.forEach((id) => {
-        const chip = document.createElement("span");
-        chip.className = "chip";
-        chip.textContent = (labels[id] || {}).en || id;
-        $("seq").appendChild(chip);
-      });
-    }
-    [...$("seq").children].forEach((chip, i) => {
-      chip.dataset.state = i < session.index ? "done" : i === session.index ? "current" : "todo";
-    });
-  }
-
-  const stream = new EventSource("/stream");
-  stream.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch (_) {} };
-  stream.onerror = () => {
-    $("status").textContent = "reconnecting";
-    $("status").dataset.status = "offline";
-  };
-</script>
+<script src="voxel-tree.js"></script>
+<script src="pose-dial.js"></script>
+<script src="mock.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
