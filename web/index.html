@@ -51,11 +51,10 @@
     border: 1px solid var(--line); cursor: pointer;
   }
   button:hover { border-color: var(--accent); }
-  main { display: grid; grid-template-columns: minmax(280px, 400px) 1fr; gap: 20px; }
-  @media (max-width: 760px) { main { grid-template-columns: 1fr; } }
+  main { display: block; }
   .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
   .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--dim); }
-  #poseEn { font-size: 40px; font-weight: 680; letter-spacing: -0.02em; margin: 6px 0 0; }
+  #poseEn { font-size: clamp(26px, 3.2vw, 40px); font-weight: 680; letter-spacing: -0.02em; margin: 6px 0 0; }
   #poseSa { font-size: 18px; color: var(--dim); font-style: italic; margin: 0 0 20px; }
   .bar { height: 14px; border-radius: 999px; background: #0b0e13; overflow: hidden; border: 1px solid var(--line); }
   .bar > div { height: 100%; width: 0%; background: var(--accent); transition: width 90ms linear; }
@@ -71,18 +70,26 @@
   .chip[data-state="current"] { color: var(--text); border-color: var(--accent); }
   .chip[data-state="done"] { color: var(--good); border-color: var(--good); }
   svg { width: 100%; height: auto; display: block; }
-  #armLine { stroke: var(--accent); transition: stroke 120ms; }
-  body[data-match="true"] #armLine { stroke: var(--good); }
   #hint { margin-top: 14px; color: var(--dim); font-size: 14px; min-height: 1.5em; }
   .posePanel { display: flex; gap: 20px; align-items: flex-start; }
   .poseMain { flex: 1; min-width: 0; }
-  .axes { width: 190px; flex: none; text-align: center; }
+  .axes { width: clamp(180px, 24vw, 260px); flex: none; text-align: center; }
   .axes svg { width: 100%; }
   .axesKey { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); }
   .axesKey span { display: flex; align-items: center; gap: 7px; }
   .axesKey i { width: 11px; height: 3px; border-radius: 2px; }
   .axesNote { font-size: 11px; color: var(--dim); text-align: left; margin: 12px 0 0; line-height: 1.45; }
-  @media (max-width: 980px) { .posePanel { flex-direction: column; } .axes { width: 100%; max-width: 260px; } }
+  .angles { display: flex; gap: 16px; margin-top: 14px; text-align: left; }
+  .angles b { display: block; font-size: 20px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  /* Stack only when it genuinely cannot fit. Above this the axis view stays in
+     the top-right corner where it is the first thing an audience looks at; below
+     it, order:-1 keeps it at the TOP of the panel rather than buried under the
+     sequence list and off the bottom of a short window. */
+  @media (max-width: 700px) {
+    .posePanel { flex-direction: column; }
+    .axes { order: -1; width: 100%; max-width: 240px; }
+    .axesNote { display: none; }
+  }
 </style>
 </head>
 <body data-match="false">
@@ -97,25 +104,6 @@
 </header>
 
 <main>
-  <section class="panel">
-    <div class="label">Orientation</div>
-    <svg viewBox="0 0 200 200" aria-label="arm orientation">
-      <circle cx="100" cy="100" r="88" fill="none" stroke="#262c36" stroke-width="1"/>
-      <circle cx="100" cy="100" r="60" fill="none" stroke="#1d232c" stroke-width="1"/>
-      <line x1="12" y1="100" x2="188" y2="100" stroke="#1d232c" stroke-width="1"/>
-      <line x1="100" y1="12" x2="100" y2="188" stroke="#1d232c" stroke-width="1"/>
-      <g id="armGroup" transform="rotate(0 100 100)">
-        <line id="armLine" x1="100" y1="100" x2="100" y2="22" stroke-width="9" stroke-linecap="round"/>
-        <circle cx="100" cy="100" r="7" fill="#e8edf4"/>
-      </g>
-    </svg>
-    <div class="readouts">
-      <div class="readout"><span class="label">Pitch</span><b id="pitch">–</b></div>
-      <div class="readout"><span class="label">Roll</span><b id="roll">–</b></div>
-      <div class="readout"><span class="label">Yaw</span><b id="yaw">–</b></div>
-    </div>
-  </section>
-
   <section class="panel posePanel">
    <div class="poseMain">
     <div class="label">Target pose</div>
@@ -147,8 +135,13 @@
        <span><i style="background:#35d07f"></i>left</span>
        <span><i style="background:#5b9dff"></i>up</span>
      </div>
-     <p class="axesNote">The IMU reports one orientation. Everything above is
-     derived from these three axes.</p>
+     <div class="angles">
+       <div><span class="label">Pitch</span><b id="pitch">–</b></div>
+       <div><span class="label">Roll</span><b id="roll">–</b></div>
+       <div><span class="label">Yaw</span><b id="yaw">–</b></div>
+     </div>
+     <p class="axesNote">The IMU reports one orientation. Everything else on this
+     page is derived from these three axes.</p>
    </aside>
   </section>
 </main>
@@ -237,9 +230,6 @@
     $("pitch").textContent = deg(arm.pitch);
     $("roll").textContent = deg(arm.roll);
     $("yaw").textContent = deg(arm.yaw);
-    // Pitch swings the arm from pointing down (-90) to straight up (+90);
-    // roll twists it. Enough to read a pose at a glance from across a room.
-    $("armGroup").setAttribute("transform", `rotate(${90 - (arm.pitch || 0)} 100 100)`);
     drawAxes(arm.yaw || 0, arm.pitch || 0, arm.roll || 0);
 
     const pose = f.pose || {};
